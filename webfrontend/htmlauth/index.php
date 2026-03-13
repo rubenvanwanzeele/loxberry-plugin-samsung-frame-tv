@@ -13,9 +13,9 @@ require_once "/opt/loxberry/libs/phplib/loxberry_system.php";
 require_once "/opt/loxberry/libs/phplib/loxberry_web.php";
 
 $pluginname  = "samsungframe";
-$cfgfile     = "$lbpconfigdir/samsungframe/samsungframe.cfg";
+$cfgfile     = "$lbpconfigdir/samsungframe.cfg";
 $bindir      = $lbpbindir;
-$logfile     = "$lbplogdir/samsungframe/monitor.log";
+$logfile     = "$lbplogdir/monitor.log";
 
 // -------------------------------------------------------------------------
 // Load / save config
@@ -89,7 +89,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
     // --- Trigger pairing ---
     if ($action === "pair") {
-        $cmd = "/usr/bin/python3 " . escapeshellarg("$bindir/samsungframe/pair.py")
+        $cmd = "/usr/bin/python3 " . escapeshellarg("$bindir/pair.py")
              . " --config " . escapeshellarg($cfgfile)
              . " 2>&1";
         $pair_output = shell_exec($cmd);
