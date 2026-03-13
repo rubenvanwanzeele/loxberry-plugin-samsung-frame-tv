@@ -66,7 +66,10 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'status') {
              . " -C 1 -W 2 2>/dev/null";
     $sub_result = trim(shell_exec($sub_cmd) ?? "");
     header('Content-Type: application/json');
-    echo json_encode(['state' => $sub_result !== "" ? $sub_result : "unknown"]);
+    echo json_encode([
+        'state'   => $sub_result !== "" ? $sub_result : "unknown",
+        'updated' => date('H:i:s'),
+    ]);
     exit;
 }
 
@@ -290,12 +293,15 @@ pre.sf-pre {
             &nbsp;|&nbsp;
             <a href="index.php" style="font-size:.9em">Refresh</a>
             &nbsp;|&nbsp;
-            <span id="sf-autorefresh-label" style="font-size:.9em;color:#aaa">auto-refresh every 10s</span>
+            <span id="sf-updated-label" style="font-size:.9em;color:#aaa">updated at <?= date('H:i:s') ?></span>
         </small>
     </p>
     <form method="post" style="display:inline">
         <input type="hidden" name="action" value="restart_daemon">
-        <button type="submit" class="sf-btn sf-btn-warning">Restart Daemon</button>
+        <button type="submit" class="sf-btn sf-btn-warning"
+                onclick="this.disabled=true;this.textContent='Restarting\u2026';this.form.submit()">
+            Restart Daemon
+        </button>
     </form>
 </div>
 <script>
@@ -311,6 +317,10 @@ pre.sf-pre {
                 if (badge) {
                     badge.style.background = stateColors[state] || '#95a5a6';
                     badge.textContent = stateLabels[state] || state;
+                }
+                var lbl = document.getElementById('sf-updated-label');
+                if (lbl && data.updated) {
+                    lbl.textContent = 'updated at ' + data.updated;
                 }
             })
             .catch(function() {});
@@ -356,7 +366,7 @@ pre.sf-pre {
                 <input type="number" name="poll_interval" value="<?= $poll_interval_v ?>" min="5" max="300">
             </div>
             <div>
-                <label>Log Level</label>
+                <label>Log Level <small>(change takes effect after daemon restart)</small></label>
                 <select name="loglevel">
                     <?php foreach ([1=>"1 – Critical",2=>"2 – Error",3=>"3 – Warning",4=>"4 – Info",5=>"5 – Debug",6=>"6 – Verbose"] as $v => $l): ?>
                     <option value="<?= $v ?>" <?= $loglevel_v == $v ? "selected" : "" ?>><?= htmlspecialchars($l) ?></option>
