@@ -299,6 +299,8 @@ def handle_command(cmd: str) -> None:
 
             elif cmd.startswith("key_"):
                 key = cmd[4:].upper()  # "key_KEY_MUTE" → "KEY_MUTE"
+                if not key.startswith("KEY_"):
+                    key = "KEY_" + key  # "key_mute" → "KEY_MUTE"
                 tv = get_tv()
                 tv.send_key(key)
                 log.info(f"Sent key: {key}")
@@ -311,7 +313,13 @@ def handle_command(cmd: str) -> None:
             reset_tv()
             time.sleep(3)
             try:
-                if cmd == "art_on":
+                if cmd == "power_on":
+                    if tv_mac:
+                        wakeonlan.send_magic_packet(tv_mac)
+                        log.info(f"Sent Wake-on-LAN to {tv_mac} (retry)")
+                    else:
+                        log.warning("power_on retry: no MAC configured for WOL")
+                elif cmd == "art_on":
                     get_art().set_artmode("on")
                     log.info("Art mode enabled (retry)")
                     publish_state("art")
@@ -324,6 +332,8 @@ def handle_command(cmd: str) -> None:
                     log.info("Sent KEY_POWER hold 3s (power off, retry)")
                 elif cmd.startswith("key_"):
                     key = cmd[4:].upper()
+                    if not key.startswith("KEY_"):
+                        key = "KEY_" + key
                     get_tv().send_key(key)
                     log.info(f"Sent key: {key} (retry)")
                 else:
@@ -375,6 +385,9 @@ def setup_mqtt() -> mqtt.Client:
     return client
 
 
+LISTENER_REFRESH_INTERVAL = 600  # seconds — restart WebSocket listener periodically
+
+
 def run_poll_loop() -> None:
     """
     Main polling loop.  Runs state checks on a configurable interval.
@@ -383,19 +396,27 @@ def run_poll_loop() -> None:
     """
     poll_interval = _config.getint("MONITOR", "POLL_INTERVAL", fallback=30)
     event_listening = False
-    reconnect_delay = 5
+    listener_started_at: float = 0.0
 
     log.info(f"Starting poll loop (interval={poll_interval}s)")
 
-    # Try to start the WebSocket event listener once the TV is reachable
     while not _shutdown.is_set():
         # Reload config on every cycle so web UI changes are picked up without restart
         config_path = _config.get("_meta", "config_path")
         _config.read(config_path)
         poll_interval = _config.getint("MONITOR", "POLL_INTERVAL", fallback=30)
 
-        if not event_listening and is_tv_on_rest():
-            event_listening = start_event_listener()
+        if is_tv_on_rest():
+            now = time.monotonic()
+            listener_stale = (now - listener_started_at) > LISTENER_REFRESH_INTERVAL
+            if not event_listening or listener_stale:
+                if event_listening and listener_stale:
+                    log.debug("Refreshing WebSocket event listener (periodic restart)")
+                    reset_tv()
+                    event_listening = False
+                event_listening = start_event_listener()
+                if event_listening:
+                    listener_started_at = time.monotonic()
 
         state = get_tv_state()
         publish_state(state)
@@ -405,6 +426,7 @@ def run_poll_loop() -> None:
             log.debug("TV is off — resetting event listener flag")
             reset_tv()
             event_listening = False
+            listener_started_at = 0.0
 
         _shutdown.wait(timeout=poll_interval)
 
@@ -443,8 +465,13 @@ def main() -> None:
 
     _mqtt_client = setup_mqtt()
 
-    # Give MQTT a moment to connect before first state publish
-    time.sleep(2)
+    # Wait for MQTT to connect before first state publish (up to 10s)
+    for _ in range(20):
+        if _mqtt_client.is_connected():
+            break
+        time.sleep(0.5)
+    else:
+        log.warning("MQTT did not connect within 10s — continuing anyway")
 
     try:
         run_poll_loop()
