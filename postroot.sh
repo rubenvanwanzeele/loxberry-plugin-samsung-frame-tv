@@ -24,6 +24,6 @@ EOF
 
 systemctl daemon-reload
 systemctl enable samsungframe.service
-systemctl start samsungframe.service
+systemctl restart samsungframe.service
 echo "<OK> Samsung Frame TV service installed and started."
 exit 0
