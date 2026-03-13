@@ -256,14 +256,16 @@ pre.sf-pre {
 <div class="sf-card">
     <h3>Live TV Status</h3>
     <p>
-        <span class="sf-state-badge" style="background:<?= $color ?>">
+        <span id="sf-state-badge" class="sf-state-badge" style="background:<?= $color ?>">
             <?= htmlspecialchars($label) ?>
         </span>
         &nbsp;
         <small style="color:#888">
             Topic: <code><?= $state_topic_v ?></code>
             &nbsp;|&nbsp;
-            <a href="" style="font-size:.9em">Refresh</a>
+            <a href="index.php" style="font-size:.9em">Refresh</a>
+            &nbsp;|&nbsp;
+            <span id="sf-autorefresh-label" style="font-size:.9em;color:#aaa">auto-refresh in <span id="sf-countdown">10</span>s</span>
         </small>
     </p>
     <form method="post" style="display:inline">
@@ -271,6 +273,20 @@ pre.sf-pre {
         <button type="submit" class="sf-btn sf-btn-warning">Restart Daemon</button>
     </form>
 </div>
+<script>
+(function() {
+    var countdown = 10;
+    var el = document.getElementById('sf-countdown');
+    var interval = setInterval(function() {
+        countdown--;
+        if (el) el.textContent = countdown;
+        if (countdown <= 0) {
+            clearInterval(interval);
+            window.location.href = 'index.php';
+        }
+    }, 1000);
+})();
+</script>
 
 <!-- =====================================================================
      SECTION 2 — CONFIGURATION
