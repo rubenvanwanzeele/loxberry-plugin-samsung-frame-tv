@@ -42,10 +42,21 @@ function cfg_write($file, $cfg) {
 }
 
 function cfg_get($plugin_cfg, $section, $key, $default = "") {
-    return isset($cfg[$section][$key]) ? $cfg[$section][$key] : $default;
+    return isset($plugin_cfg[$section][$key]) ? $plugin_cfg[$section][$key] : $default;
+}
+
+function mqtt_credentials() {
+    $json_file = '/opt/loxberry/config/mqtt.json';
+    if (!file_exists($json_file)) return ['user' => '', 'pass' => ''];
+    $data = json_decode(file_get_contents($json_file), true) ?? [];
+    return [
+        'user' => $data['brokeruser'] ?? $data['User'] ?? $data['username'] ?? '',
+        'pass' => $data['brokerpass'] ?? $data['Password'] ?? $data['password'] ?? '',
+    ];
 }
 
 $plugin_cfg = cfg_read($cfgfile);
+$mqtt_cred  = mqtt_credentials();
 
 // -------------------------------------------------------------------------
 // Handle form submissions
@@ -115,8 +126,10 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             $topic = cfg_get($plugin_cfg, "MQTT", "CMD_TOPIC", "loxberry/plugin/samsungframe/cmd");
             $mqtt_host = cfg_get($plugin_cfg, "MQTT", "HOST", "localhost");
             $mqtt_port = cfg_get($plugin_cfg, "MQTT", "PORT", "1883");
+            $auth = $mqtt_cred['user'] ? " -u " . escapeshellarg($mqtt_cred['user']) . " -P " . escapeshellarg($mqtt_cred['pass']) : "";
             $pub_cmd = "mosquitto_pub -h " . escapeshellarg($mqtt_host)
                      . " -p " . escapeshellarg($mqtt_port)
+                     . $auth
                      . " -t " . escapeshellarg($topic)
                      . " -m " . escapeshellarg($cmd_payload)
                      . " 2>&1";
@@ -141,8 +154,10 @@ $state_topic = cfg_get($plugin_cfg, "MQTT", "STATE_TOPIC", "loxberry/plugin/sams
 $mqtt_host   = cfg_get($plugin_cfg, "MQTT", "HOST", "localhost");
 $mqtt_port   = cfg_get($plugin_cfg, "MQTT", "PORT", "1883");
 
+$auth = $mqtt_cred['user'] ? " -u " . escapeshellarg($mqtt_cred['user']) . " -P " . escapeshellarg($mqtt_cred['pass']) : "";
 $sub_cmd = "mosquitto_sub -h " . escapeshellarg($mqtt_host)
          . " -p " . escapeshellarg($mqtt_port)
+         . $auth
          . " -t " . escapeshellarg($state_topic)
          . " -C 1 -W 2 2>/dev/null";
 $sub_result = trim(shell_exec($sub_cmd) ?? "");

@@ -315,11 +315,29 @@ def handle_command(cmd: str) -> None:
 # Main loop
 # ---------------------------------------------------------------------------
 
+def get_mqtt_credentials() -> tuple[str, str]:
+    """Read MQTT credentials from LoxBerry's central mqtt.json."""
+    try:
+        with open("/opt/loxberry/config/mqtt.json") as f:
+            data = json.load(f)
+        user = data.get("brokeruser") or data.get("User") or data.get("username") or ""
+        password = data.get("brokerpass") or data.get("Password") or data.get("password") or ""
+        return user, password
+    except Exception as e:
+        log.debug(f"Could not read mqtt.json: {e} — connecting without credentials")
+        return "", ""
+
+
 def setup_mqtt() -> mqtt.Client:
     client = mqtt.Client(client_id="samsungframe-monitor", clean_session=True)
     client.on_connect = on_mqtt_connect
     client.on_disconnect = on_mqtt_disconnect
     client.on_message = on_mqtt_message
+
+    user, password = get_mqtt_credentials()
+    if user:
+        client.username_pw_set(user, password)
+        log.info(f"MQTT using credentials for user '{user}'")
 
     host = _config.get("MQTT", "HOST", fallback="localhost")
     port = _config.getint("MQTT", "PORT", fallback=1883)
