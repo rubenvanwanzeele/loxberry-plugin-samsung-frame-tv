@@ -1,9 +1,7 @@
 #!/bin/bash
-# Runs before a plugin upgrade.
-# Stop the daemon gracefully so files can be replaced safely.
+# Runs before a plugin upgrade — stop the service gracefully
 
-echo "<INFO> Stopping Samsung Frame TV daemon before upgrade..."
-pkill -f "monitor.py" 2>/dev/null || true
-sleep 1
+echo "<INFO> Stopping Samsung Frame TV service before upgrade..."
+systemctl stop samsungframe.service 2>/dev/null || true
 echo "<OK> Pre-upgrade complete."
 exit 0

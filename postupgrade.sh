@@ -1,8 +1,11 @@
 #!/bin/bash
-# Runs after a plugin upgrade.
-# Re-install Python dependencies in case new ones were added.
+# Runs after a plugin upgrade — update deps and restart service
 
-echo "<INFO> Installing/updating Python dependencies..."
+echo "<INFO> Updating Python dependencies..."
 pip3 install --quiet "samsungtvws[encrypted]" paho-mqtt wakeonlan
+
+echo "<INFO> Restarting Samsung Frame TV service..."
+systemctl daemon-reload
+systemctl restart samsungframe.service
 echo "<OK> Post-upgrade complete."
 exit 0

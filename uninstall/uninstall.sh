@@ -1,9 +1,11 @@
 #!/bin/bash
 # Uninstall script for Samsung Frame TV plugin
-# LoxBerry calls this before removing plugin files
 
-echo "<INFO> Stopping Samsung Frame TV daemon..."
-pkill -f "monitor.py" 2>/dev/null || true
+echo "<INFO> Stopping and removing Samsung Frame TV service..."
+systemctl stop samsungframe.service 2>/dev/null || true
+systemctl disable samsungframe.service 2>/dev/null || true
+rm -f /etc/systemd/system/samsungframe.service
+systemctl daemon-reload
 
 echo "<OK> Samsung Frame TV plugin uninstalled."
 exit 0
