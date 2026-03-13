@@ -146,15 +146,22 @@ def is_tv_on_rest() -> bool | None:
         return None
 
 
-def get_tv_state() -> str:
+def get_tv_state(use_websocket: bool = True) -> str:
     """
     Determine full TV state: "off" / "art" / "on".
     Uses REST first, then WebSocket for art mode.
+    When use_websocket=False (event listener is active and owns the socket),
+    the REST check is still performed but art mode is inferred from the last
+    published state rather than querying the TV directly.
     """
     powered_on = is_tv_on_rest()
 
     if powered_on is None or not powered_on:
         return "off"
+
+    if not use_websocket:
+        # Event listener owns the WebSocket — trust last known art mode state
+        return _current_state if _current_state in ("art", "on") else "on"
 
     # TV is on — check art mode via WebSocket
     with _tv_lock:
@@ -218,11 +225,21 @@ def on_tv_event(event) -> None:
 def start_event_listener() -> bool:
     """
     Attempt to start the WebSocket event listener on the TV.
+    Captures the current art mode state first (while the socket is free),
+    then hands the connection to the listener thread.
     Returns True on success, False if not supported or failed.
     """
     with _tv_lock:
         try:
             tv = get_tv()
+            # Query art mode BEFORE start_listening() takes over the socket
+            try:
+                artmode = get_art().get_artmode()
+                initial = "art" if artmode == "on" else "on"
+                log.debug(f"Initial art mode before listener: {artmode!r}")
+                publish_state(initial)
+            except Exception as e:
+                log.debug(f"Could not read initial art mode: {e}")
             tv.start_listening(callback=on_tv_event)
             log.info("WebSocket event listener started.")
             return True
@@ -418,7 +435,9 @@ def run_poll_loop() -> None:
                 if event_listening:
                     listener_started_at = time.monotonic()
 
-        state = get_tv_state()
+        # When the event listener owns the WebSocket, skip the art mode WS call
+        # to avoid socket conflicts — trust event-driven state instead
+        state = get_tv_state(use_websocket=not event_listening)
         publish_state(state)
 
         # If TV went off, the WebSocket listener is now dead — reset for next time
