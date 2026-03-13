@@ -81,6 +81,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'status') {
 
 $message = "";
 $message_type = "info";  // "info" | "success" | "error"
+$refresh_after_cmd = false;
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
     $action = $_POST["action"] ?? "";
@@ -157,6 +158,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             $pub_out = shell_exec($pub_cmd);
             $message = "Command '$cmd_payload' sent." . ($pub_out ? " ($pub_out)" : "");
             $message_type = "success";
+            $refresh_after_cmd = true;
         }
     }
 
@@ -331,6 +333,11 @@ pre.sf-pre {
             .catch(function() {});
     }
     setInterval(refreshState, 10000);
+    <?php if ($refresh_after_cmd): ?>
+    // Command was just sent — refresh at 3s and 6s to catch the TV reacting
+    setTimeout(refreshState, 3000);
+    setTimeout(refreshState, 6000);
+    <?php endif; ?>
 })();
 </script>
 
