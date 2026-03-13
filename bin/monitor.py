@@ -337,16 +337,20 @@ def handle_command(cmd: str) -> None:
 # Main loop
 # ---------------------------------------------------------------------------
 
-def get_mqtt_credentials() -> tuple[str, str]:
-    """Read MQTT credentials from LoxBerry's general.json (Mqtt section)."""
+def get_mqtt_connection() -> tuple[str, int, str, str]:
+    """Read MQTT host, port and credentials from LoxBerry's general.json (Mqtt section)."""
     try:
         with open("/opt/loxberry/config/system/general.json") as f:
             data = json.load(f)
-        mqtt = data.get("Mqtt", {})
-        return mqtt.get("Brokeruser", ""), mqtt.get("Brokerpass", "")
+        mqtt_cfg = data.get("Mqtt", {})
+        host = mqtt_cfg.get("Brokerhost", "localhost") or "localhost"
+        port = int(mqtt_cfg.get("Brokerport", 1883) or 1883)
+        user = mqtt_cfg.get("Brokeruser", "")
+        password = mqtt_cfg.get("Brokerpass", "")
+        return host, port, user, password
     except Exception as e:
-        log.debug(f"Could not read general.json: {e} — connecting without credentials")
-        return "", ""
+        log.debug(f"Could not read general.json: {e} — using defaults")
+        return "localhost", 1883, "", ""
 
 
 def setup_mqtt() -> mqtt.Client:
@@ -355,13 +359,10 @@ def setup_mqtt() -> mqtt.Client:
     client.on_disconnect = on_mqtt_disconnect
     client.on_message = on_mqtt_message
 
-    user, password = get_mqtt_credentials()
+    host, port, user, password = get_mqtt_connection()
     if user:
         client.username_pw_set(user, password)
         log.info(f"MQTT using credentials for user '{user}'")
-
-    host = _config.get("MQTT", "HOST", fallback="localhost")
-    port = _config.getint("MQTT", "PORT", fallback=1883)
 
     # Set last-will so Loxone sees "off" if the daemon crashes
     state_topic = _config.get("MQTT", "STATE_TOPIC",

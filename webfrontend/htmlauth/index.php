@@ -1,7 +1,4 @@
 <?php
-error_reporting(E_ALL);
-ini_set('display_errors', 1);
-
 /**
  * Samsung Frame TV — LoxBerry Plugin Web UI
  *
@@ -30,9 +27,9 @@ function cfg_read($file) {
     return $cfg ?: [];
 }
 
-function cfg_write($file, $cfg) {
+function cfg_write($file, $plugin_cfg) {
     $out = "";
-    foreach ($cfg as $section => $pairs) {
+    foreach ($plugin_cfg as $section => $pairs) {
         $out .= "[$section]\n";
         foreach ($pairs as $k => $v) {
             $out .= "$k=$v\n";
@@ -48,6 +45,30 @@ function cfg_get($plugin_cfg, $section, $key, $default = "") {
 
 $plugin_cfg = cfg_read($cfgfile);
 $mqtt_cred  = mqtt_connectiondetails();
+
+// MQTT broker connection details always come from LoxBerry system config
+$mqtt_host = !empty($mqtt_cred['brokerhost']) ? $mqtt_cred['brokerhost'] : 'localhost';
+$mqtt_port = !empty($mqtt_cred['brokerport']) ? $mqtt_cred['brokerport'] : 1883;
+$mqtt_auth = !empty($mqtt_cred['brokeruser'])
+    ? " -u " . escapeshellarg($mqtt_cred['brokeruser']) . " -P " . escapeshellarg($mqtt_cred['brokerpass'])
+    : "";
+
+// -------------------------------------------------------------------------
+// AJAX endpoint — returns JSON state without full page reload
+// -------------------------------------------------------------------------
+
+if (isset($_GET['ajax']) && $_GET['ajax'] === 'status') {
+    $state_topic = cfg_get($plugin_cfg, "MQTT", "STATE_TOPIC", "loxberry/plugin/samsungframe/state");
+    $sub_cmd = "mosquitto_sub -h " . escapeshellarg($mqtt_host)
+             . " -p " . escapeshellarg($mqtt_port)
+             . $mqtt_auth
+             . " -t " . escapeshellarg($state_topic)
+             . " -C 1 -W 2 2>/dev/null";
+    $sub_result = trim(shell_exec($sub_cmd) ?? "");
+    header('Content-Type: application/json');
+    echo json_encode(['state' => $sub_result !== "" ? $sub_result : "unknown"]);
+    exit;
+}
 
 // -------------------------------------------------------------------------
 // Handle form submissions
@@ -85,8 +106,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         $plugin_cfg["TV"]["MAC"]  = $tv_mac;
         $plugin_cfg["TV"]["PORT"] = $tv_port;
         $plugin_cfg["TV"]["NAME"] = $tv_name;
-        $plugin_cfg["MQTT"]["HOST"]        = trim($_POST["mqtt_host"] ?? "localhost");
-        $plugin_cfg["MQTT"]["PORT"]        = intval($_POST["mqtt_port"] ?? 1883);
         $plugin_cfg["MQTT"]["STATE_TOPIC"] = trim($_POST["state_topic"] ?? "loxberry/plugin/samsungframe/state");
         $plugin_cfg["MQTT"]["CMD_TOPIC"]   = trim($_POST["cmd_topic"]   ?? "loxberry/plugin/samsungframe/cmd");
         $plugin_cfg["MONITOR"]["POLL_INTERVAL"] = intval($_POST["poll_interval"] ?? 30);
@@ -122,12 +141,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         $cmd_payload = trim($_POST["cmd_payload"] ?? "");
         if ($cmd_payload !== "") {
             $topic = cfg_get($plugin_cfg, "MQTT", "CMD_TOPIC", "loxberry/plugin/samsungframe/cmd");
-            $mqtt_host = cfg_get($plugin_cfg, "MQTT", "HOST", "localhost");
-            $mqtt_port = cfg_get($plugin_cfg, "MQTT", "PORT", "1883");
-            $auth = !empty($mqtt_cred['brokeruser']) ? " -u " . escapeshellarg($mqtt_cred['brokeruser']) . " -P " . escapeshellarg($mqtt_cred['brokerpass']) : "";
             $pub_cmd = "mosquitto_pub -h " . escapeshellarg($mqtt_host)
                      . " -p " . escapeshellarg($mqtt_port)
-                     . $auth
+                     . $mqtt_auth
                      . " -t " . escapeshellarg($topic)
                      . " -m " . escapeshellarg($cmd_payload)
                      . " 2>&1";
@@ -146,16 +162,11 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 // -------------------------------------------------------------------------
 
 $tv_state = "unknown";
-$state_age = "–";
 
 $state_topic = cfg_get($plugin_cfg, "MQTT", "STATE_TOPIC", "loxberry/plugin/samsungframe/state");
-$mqtt_host   = cfg_get($plugin_cfg, "MQTT", "HOST", "localhost");
-$mqtt_port   = cfg_get($plugin_cfg, "MQTT", "PORT", "1883");
-
-$auth = !empty($mqtt_cred['brokeruser']) ? " -u " . escapeshellarg($mqtt_cred['brokeruser']) . " -P " . escapeshellarg($mqtt_cred['brokerpass']) : "";
 $sub_cmd = "mosquitto_sub -h " . escapeshellarg($mqtt_host)
          . " -p " . escapeshellarg($mqtt_port)
-         . $auth
+         . $mqtt_auth
          . " -t " . escapeshellarg($state_topic)
          . " -C 1 -W 2 2>/dev/null";
 $sub_result = trim(shell_exec($sub_cmd) ?? "");
@@ -164,17 +175,21 @@ if ($sub_result !== "") {
 }
 
 // -------------------------------------------------------------------------
+// Pairing status
+// -------------------------------------------------------------------------
+
+$is_paired = file_exists("$lbpconfigdir/token.txt");
+
+// -------------------------------------------------------------------------
 // Page output
 // -------------------------------------------------------------------------
 
 LBWeb::lbheader("Samsung Frame TV", $pluginname, "help.html");
 
-$tv_ip       = htmlspecialchars(cfg_get($plugin_cfg, "TV", "IP", "192.168.1.43"));
-$tv_mac      = htmlspecialchars(cfg_get($plugin_cfg, "TV", "MAC", ""));
-$tv_port_val = htmlspecialchars(cfg_get($plugin_cfg, "TV", "PORT", "8002"));
-$tv_name_val = htmlspecialchars(cfg_get($plugin_cfg, "TV", "NAME", "LoxBerry"));
-$mqtt_host_v = htmlspecialchars(cfg_get($plugin_cfg, "MQTT", "HOST", "localhost"));
-$mqtt_port_v = htmlspecialchars(cfg_get($plugin_cfg, "MQTT", "PORT", "1883"));
+$tv_ip         = htmlspecialchars(cfg_get($plugin_cfg, "TV", "IP", "192.168.1.43"));
+$tv_mac        = htmlspecialchars(cfg_get($plugin_cfg, "TV", "MAC", ""));
+$tv_port_val   = htmlspecialchars(cfg_get($plugin_cfg, "TV", "PORT", "8002"));
+$tv_name_val   = htmlspecialchars(cfg_get($plugin_cfg, "TV", "NAME", "LoxBerry"));
 $state_topic_v = htmlspecialchars(cfg_get($plugin_cfg, "MQTT", "STATE_TOPIC", "loxberry/plugin/samsungframe/state"));
 $cmd_topic_v   = htmlspecialchars(cfg_get($plugin_cfg, "MQTT", "CMD_TOPIC",   "loxberry/plugin/samsungframe/cmd"));
 $poll_interval_v = htmlspecialchars(cfg_get($plugin_cfg, "MONITOR", "POLL_INTERVAL", "30"));
@@ -218,7 +233,17 @@ $label = $state_label[$tv_state] ?? ucfirst($tv_state);
     font-size: 1.1em;
     font-weight: 600;
     letter-spacing: .5px;
+    transition: background .4s;
 }
+.sf-pair-status {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: .95em;
+}
+.sf-pair-status.paired   { background: #d5f5e3; color: #1e8449; }
+.sf-pair-status.unpaired { background: #fdebd0; color: #a04000; }
 .sf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 24px; }
 .sf-grid label { font-weight: 500; }
 .sf-grid input, .sf-grid select {
@@ -265,7 +290,7 @@ pre.sf-pre {
             &nbsp;|&nbsp;
             <a href="index.php" style="font-size:.9em">Refresh</a>
             &nbsp;|&nbsp;
-            <span id="sf-autorefresh-label" style="font-size:.9em;color:#aaa">auto-refresh in <span id="sf-countdown">10</span>s</span>
+            <span id="sf-autorefresh-label" style="font-size:.9em;color:#aaa">auto-refresh every 10s</span>
         </small>
     </p>
     <form method="post" style="display:inline">
@@ -275,16 +300,22 @@ pre.sf-pre {
 </div>
 <script>
 (function() {
-    var countdown = 10;
-    var el = document.getElementById('sf-countdown');
-    var interval = setInterval(function() {
-        countdown--;
-        if (el) el.textContent = countdown;
-        if (countdown <= 0) {
-            clearInterval(interval);
-            window.location.href = 'index.php';
-        }
-    }, 1000);
+    var stateColors = {"off":"#e74c3c","art":"#9b59b6","on":"#2ecc71","unknown":"#95a5a6"};
+    var stateLabels = {"off":"Off","art":"Art Mode","on":"On (Active)","unknown":"Unknown"};
+    function refreshState() {
+        fetch('index.php?ajax=status')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var state = data.state || 'unknown';
+                var badge = document.getElementById('sf-state-badge');
+                if (badge) {
+                    badge.style.background = stateColors[state] || '#95a5a6';
+                    badge.textContent = stateLabels[state] || state;
+                }
+            })
+            .catch(function() {});
+    }
+    setInterval(refreshState, 10000);
 })();
 </script>
 
@@ -313,14 +344,6 @@ pre.sf-pre {
                 <input type="text" name="tv_name" value="<?= $tv_name_val ?>">
             </div>
             <div>
-                <label>MQTT Host</label>
-                <input type="text" name="mqtt_host" value="<?= $mqtt_host_v ?>">
-            </div>
-            <div>
-                <label>MQTT Port</label>
-                <input type="number" name="mqtt_port" value="<?= $mqtt_port_v ?>" min="1" max="65535">
-            </div>
-            <div>
                 <label>State Topic <small>(plugin → Loxone)</small></label>
                 <input type="text" name="state_topic" value="<?= $state_topic_v ?>">
             </div>
@@ -341,6 +364,9 @@ pre.sf-pre {
                 </select>
             </div>
         </div>
+        <p style="margin:10px 0 4px;color:#888;font-size:.88em">
+            MQTT broker host and port are read automatically from LoxBerry system settings.
+        </p>
         <div class="sf-btn-row">
             <button type="submit" class="sf-btn sf-btn-primary">Save Configuration</button>
         </div>
@@ -352,6 +378,16 @@ pre.sf-pre {
      ===================================================================== -->
 <div class="sf-card">
     <h3>TV Pairing</h3>
+    <p>
+        Pairing status:
+        <?php if ($is_paired): ?>
+            <span class="sf-pair-status paired">Paired ✓</span>
+            <small style="color:#888;margin-left:8px">Token file exists — TV will be accessed automatically.</small>
+        <?php else: ?>
+            <span class="sf-pair-status unpaired">Not paired</span>
+            <small style="color:#888;margin-left:8px">No token saved yet. Click Start Pairing below.</small>
+        <?php endif; ?>
+    </p>
     <p>
         Click <strong>Start Pairing</strong> to connect to the TV for the first time.
         A popup will appear on the TV — accept it within 30 seconds.
