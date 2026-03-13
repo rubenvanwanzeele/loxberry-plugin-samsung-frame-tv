@@ -1,5 +1,5 @@
 #!/bin/bash
-# Uninstall script for Samsung Frame TV plugin
+# Uninstall script — runs as root
 
 echo "<INFO> Stopping and removing Samsung Frame TV service..."
 systemctl stop samsungframe.service 2>/dev/null || true

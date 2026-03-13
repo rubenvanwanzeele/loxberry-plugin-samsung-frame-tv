@@ -1,5 +1,5 @@
 #!/bin/bash
-# Runs after a plugin upgrade — update deps and restart service
+# Runs as root after a plugin upgrade
 
 echo "<INFO> Updating Python dependencies..."
 pip3 install --quiet "samsungtvws[encrypted]" paho-mqtt wakeonlan

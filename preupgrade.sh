@@ -1,5 +1,5 @@
 #!/bin/bash
-# Runs before a plugin upgrade — stop the service gracefully
+# Runs as root before a plugin upgrade
 
 echo "<INFO> Stopping Samsung Frame TV service before upgrade..."
 systemctl stop samsungframe.service 2>/dev/null || true
