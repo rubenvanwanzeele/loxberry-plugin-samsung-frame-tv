@@ -316,15 +316,14 @@ def handle_command(cmd: str) -> None:
 # ---------------------------------------------------------------------------
 
 def get_mqtt_credentials() -> tuple[str, str]:
-    """Read MQTT credentials from LoxBerry's central mqtt.json."""
+    """Read MQTT credentials from LoxBerry's general.json (Mqtt section)."""
     try:
-        with open("/opt/loxberry/config/mqtt.json") as f:
+        with open("/opt/loxberry/config/system/general.json") as f:
             data = json.load(f)
-        user = data.get("brokeruser") or data.get("User") or data.get("username") or ""
-        password = data.get("brokerpass") or data.get("Password") or data.get("password") or ""
-        return user, password
+        mqtt = data.get("Mqtt", {})
+        return mqtt.get("Brokeruser", ""), mqtt.get("Brokerpass", "")
     except Exception as e:
-        log.debug(f"Could not read mqtt.json: {e} — connecting without credentials")
+        log.debug(f"Could not read general.json: {e} — connecting without credentials")
         return "", ""
 
 
