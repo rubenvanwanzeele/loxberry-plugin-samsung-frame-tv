@@ -41,11 +41,11 @@ function cfg_write($file, $cfg) {
     file_put_contents($file, $out);
 }
 
-function cfg_get($cfg, $section, $key, $default = "") {
+function cfg_get($plugin_cfg, $section, $key, $default = "") {
     return isset($cfg[$section][$key]) ? $cfg[$section][$key] : $default;
 }
 
-$cfg = cfg_read($cfgfile);
+$plugin_cfg = cfg_read($cfgfile);
 
 // -------------------------------------------------------------------------
 // Handle form submissions
@@ -72,18 +72,18 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             }
         }
 
-        $cfg["TV"]["IP"]   = $tv_ip;
-        $cfg["TV"]["MAC"]  = $tv_mac;
-        $cfg["TV"]["PORT"] = $tv_port;
-        $cfg["TV"]["NAME"] = $tv_name;
-        $cfg["MQTT"]["HOST"]        = trim($_POST["mqtt_host"] ?? "localhost");
-        $cfg["MQTT"]["PORT"]        = intval($_POST["mqtt_port"] ?? 1883);
-        $cfg["MQTT"]["STATE_TOPIC"] = trim($_POST["state_topic"] ?? "loxberry/plugin/samsungframe/state");
-        $cfg["MQTT"]["CMD_TOPIC"]   = trim($_POST["cmd_topic"]   ?? "loxberry/plugin/samsungframe/cmd");
-        $cfg["MONITOR"]["POLL_INTERVAL"] = intval($_POST["poll_interval"] ?? 30);
-        $cfg["MONITOR"]["LOGLEVEL"]      = intval($_POST["loglevel"] ?? 3);
+        $plugin_cfg["TV"]["IP"]   = $tv_ip;
+        $plugin_cfg["TV"]["MAC"]  = $tv_mac;
+        $plugin_cfg["TV"]["PORT"] = $tv_port;
+        $plugin_cfg["TV"]["NAME"] = $tv_name;
+        $plugin_cfg["MQTT"]["HOST"]        = trim($_POST["mqtt_host"] ?? "localhost");
+        $plugin_cfg["MQTT"]["PORT"]        = intval($_POST["mqtt_port"] ?? 1883);
+        $plugin_cfg["MQTT"]["STATE_TOPIC"] = trim($_POST["state_topic"] ?? "loxberry/plugin/samsungframe/state");
+        $plugin_cfg["MQTT"]["CMD_TOPIC"]   = trim($_POST["cmd_topic"]   ?? "loxberry/plugin/samsungframe/cmd");
+        $plugin_cfg["MONITOR"]["POLL_INTERVAL"] = intval($_POST["poll_interval"] ?? 30);
+        $plugin_cfg["MONITOR"]["LOGLEVEL"]      = intval($_POST["loglevel"] ?? 3);
 
-        cfg_write($cfgfile, $cfg);
+        cfg_write($cfgfile, $plugin_cfg);
 
         $mac_note = $tv_mac ? " (MAC: $tv_mac)" : "";
         $message = "Configuration saved.$mac_note";
@@ -112,9 +112,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     if ($action === "test_cmd") {
         $cmd_payload = trim($_POST["cmd_payload"] ?? "");
         if ($cmd_payload !== "") {
-            $topic = cfg_get($cfg, "MQTT", "CMD_TOPIC", "loxberry/plugin/samsungframe/cmd");
-            $mqtt_host = cfg_get($cfg, "MQTT", "HOST", "localhost");
-            $mqtt_port = cfg_get($cfg, "MQTT", "PORT", "1883");
+            $topic = cfg_get($plugin_cfg, "MQTT", "CMD_TOPIC", "loxberry/plugin/samsungframe/cmd");
+            $mqtt_host = cfg_get($plugin_cfg, "MQTT", "HOST", "localhost");
+            $mqtt_port = cfg_get($plugin_cfg, "MQTT", "PORT", "1883");
             $pub_cmd = "mosquitto_pub -h " . escapeshellarg($mqtt_host)
                      . " -p " . escapeshellarg($mqtt_port)
                      . " -t " . escapeshellarg($topic)
@@ -127,7 +127,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     }
 
     // Reload config after any save
-    $cfg = cfg_read($cfgfile);
+    $plugin_cfg = cfg_read($cfgfile);
 }
 
 // -------------------------------------------------------------------------
@@ -137,9 +137,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 $tv_state = "unknown";
 $state_age = "–";
 
-$state_topic = cfg_get($cfg, "MQTT", "STATE_TOPIC", "loxberry/plugin/samsungframe/state");
-$mqtt_host   = cfg_get($cfg, "MQTT", "HOST", "localhost");
-$mqtt_port   = cfg_get($cfg, "MQTT", "PORT", "1883");
+$state_topic = cfg_get($plugin_cfg, "MQTT", "STATE_TOPIC", "loxberry/plugin/samsungframe/state");
+$mqtt_host   = cfg_get($plugin_cfg, "MQTT", "HOST", "localhost");
+$mqtt_port   = cfg_get($plugin_cfg, "MQTT", "PORT", "1883");
 
 $sub_cmd = "mosquitto_sub -h " . escapeshellarg($mqtt_host)
          . " -p " . escapeshellarg($mqtt_port)
@@ -156,16 +156,16 @@ if ($sub_result !== "") {
 
 LBWeb::lbheader("Samsung Frame TV", $pluginname, "help.html");
 
-$tv_ip       = htmlspecialchars(cfg_get($cfg, "TV", "IP", "192.168.1.43"));
-$tv_mac      = htmlspecialchars(cfg_get($cfg, "TV", "MAC", ""));
-$tv_port_val = htmlspecialchars(cfg_get($cfg, "TV", "PORT", "8002"));
-$tv_name_val = htmlspecialchars(cfg_get($cfg, "TV", "NAME", "LoxBerry"));
-$mqtt_host_v = htmlspecialchars(cfg_get($cfg, "MQTT", "HOST", "localhost"));
-$mqtt_port_v = htmlspecialchars(cfg_get($cfg, "MQTT", "PORT", "1883"));
-$state_topic_v = htmlspecialchars(cfg_get($cfg, "MQTT", "STATE_TOPIC", "loxberry/plugin/samsungframe/state"));
-$cmd_topic_v   = htmlspecialchars(cfg_get($cfg, "MQTT", "CMD_TOPIC",   "loxberry/plugin/samsungframe/cmd"));
-$poll_interval_v = htmlspecialchars(cfg_get($cfg, "MONITOR", "POLL_INTERVAL", "30"));
-$loglevel_v    = intval(cfg_get($cfg, "MONITOR", "LOGLEVEL", "3"));
+$tv_ip       = htmlspecialchars(cfg_get($plugin_cfg, "TV", "IP", "192.168.1.43"));
+$tv_mac      = htmlspecialchars(cfg_get($plugin_cfg, "TV", "MAC", ""));
+$tv_port_val = htmlspecialchars(cfg_get($plugin_cfg, "TV", "PORT", "8002"));
+$tv_name_val = htmlspecialchars(cfg_get($plugin_cfg, "TV", "NAME", "LoxBerry"));
+$mqtt_host_v = htmlspecialchars(cfg_get($plugin_cfg, "MQTT", "HOST", "localhost"));
+$mqtt_port_v = htmlspecialchars(cfg_get($plugin_cfg, "MQTT", "PORT", "1883"));
+$state_topic_v = htmlspecialchars(cfg_get($plugin_cfg, "MQTT", "STATE_TOPIC", "loxberry/plugin/samsungframe/state"));
+$cmd_topic_v   = htmlspecialchars(cfg_get($plugin_cfg, "MQTT", "CMD_TOPIC",   "loxberry/plugin/samsungframe/cmd"));
+$poll_interval_v = htmlspecialchars(cfg_get($plugin_cfg, "MONITOR", "POLL_INTERVAL", "30"));
+$loglevel_v    = intval(cfg_get($plugin_cfg, "MONITOR", "LOGLEVEL", "3"));
 
 $state_color = ["off" => "#e74c3c", "art" => "#9b59b6", "on" => "#2ecc71", "unknown" => "#95a5a6"];
 $state_label = ["off" => "Off", "art" => "Art Mode", "on" => "On (Active)", "unknown" => "Unknown"];
