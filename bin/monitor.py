@@ -307,8 +307,30 @@ def handle_command(cmd: str) -> None:
                 log.warning(f"Unknown command: {cmd!r}")
 
         except Exception as e:
-            log.error(f"Command '{cmd}' failed: {type(e).__name__}: {e}")
+            log.warning(f"Command '{cmd}' failed on first attempt: {type(e).__name__}: {e} — retrying once")
             reset_tv()
+            time.sleep(3)
+            try:
+                if cmd == "art_on":
+                    get_art().set_artmode("on")
+                    log.info("Art mode enabled (retry)")
+                    publish_state("art")
+                elif cmd == "art_off":
+                    get_art().set_artmode("off")
+                    log.info("Art mode disabled (retry)")
+                    publish_state("on")
+                elif cmd == "power_off":
+                    get_tv().hold_key("KEY_POWER", 3)
+                    log.info("Sent KEY_POWER hold 3s (power off, retry)")
+                elif cmd.startswith("key_"):
+                    key = cmd[4:].upper()
+                    get_tv().send_key(key)
+                    log.info(f"Sent key: {key} (retry)")
+                else:
+                    log.error(f"Command '{cmd}' failed: {type(e).__name__}: {e}")
+            except Exception as e2:
+                log.error(f"Command '{cmd}' failed after retry: {type(e2).__name__}: {e2}")
+                reset_tv()
 
 
 # ---------------------------------------------------------------------------
