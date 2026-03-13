@@ -116,8 +116,10 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
         cfg_write($cfgfile, $plugin_cfg);
 
+        shell_exec("sudo /bin/systemctl restart samsungframe.service 2>&1");
+
         $mac_note = $tv_mac ? " (MAC: $tv_mac)" : "";
-        $message = "Configuration saved.$mac_note";
+        $message = "Configuration saved and daemon restarted.$mac_note";
         $message_type = "success";
     }
 
@@ -299,7 +301,8 @@ pre.sf-pre {
     <form method="post" style="display:inline">
         <input type="hidden" name="action" value="restart_daemon">
         <button type="submit" class="sf-btn sf-btn-warning"
-                onclick="this.disabled=true;this.textContent='Restarting\u2026';this.form.submit()">
+                onclick="this.disabled=true;this.textContent='Restarting\u2026';this.form.submit()"
+                title="The daemon restarts automatically on config save. Use this only if needed.">
             Restart Daemon
         </button>
     </form>
