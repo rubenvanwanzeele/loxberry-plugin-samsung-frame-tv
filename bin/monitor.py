@@ -57,10 +57,13 @@ log = logging.getLogger("samsungframe")
 _config: configparser.ConfigParser = None
 _mqtt_client: mqtt.Client = None
 _tv: SamsungTVWS = None
-_art = None                   # cached art() instance
-_tv_lock = threading.Lock()   # serialize TV access from MQTT thread + main loop
+_art = None                       # cached art() instance
+_tv_lock = threading.Lock()       # serialize TV access from MQTT thread + main loop
 
-_current_state: str = ""      # last published state: "off" / "art" / "on"
+_tv_listener: SamsungTVWS = None  # dedicated instance for start_listening()
+_listener_lock = threading.Lock() # protects _tv_listener
+
+_current_state: str = ""          # last published state: "off" / "art" / "on"
 _shutdown = threading.Event()
 
 
@@ -131,6 +134,33 @@ def reset_tv() -> None:
     _art = None
 
 
+def get_tv_listener() -> SamsungTVWS:
+    """Return (creating if needed) a dedicated SamsungTVWS instance for the event listener."""
+    global _tv_listener
+    if _tv_listener is None:
+        tv_ip = _config.get("TV", "IP")
+        tv_port = _config.getint("TV", "PORT", fallback=8002)
+        tv_name = _config.get("TV", "NAME", fallback="LoxBerry")
+        config_dir = os.path.dirname(
+            _config.get("_meta", "config_path", fallback="/tmp/samsungframe.cfg")
+        )
+        token_file = os.path.join(config_dir, "token.txt")
+        _tv_listener = SamsungTVWS(
+            host=tv_ip,
+            port=tv_port,
+            token_file=token_file,
+            timeout=5,
+            name=tv_name,
+        )
+    return _tv_listener
+
+
+def reset_tv_listener() -> None:
+    """Discard the listener instance so it is recreated on next use."""
+    global _tv_listener
+    _tv_listener = None
+
+
 def is_tv_on_rest() -> bool | None:
     """
     Check TV power state via REST (no auth, works in standby).
@@ -146,24 +176,19 @@ def is_tv_on_rest() -> bool | None:
         return None
 
 
-def get_tv_state(use_websocket: bool = True) -> str:
+def get_tv_state() -> str:
     """
     Determine full TV state: "off" / "art" / "on".
     Uses REST first, then WebSocket for art mode.
-    When use_websocket=False (event listener is active and owns the socket),
-    the REST check is still performed but art mode is inferred from the last
-    published state rather than querying the TV directly.
+    The polling WebSocket (_tv) is separate from the event listener (_tv_listener)
+    so both can run concurrently without conflict.
     """
     powered_on = is_tv_on_rest()
 
     if powered_on is None or not powered_on:
         return "off"
 
-    if not use_websocket:
-        # Event listener owns the WebSocket — trust last known art mode state
-        return _current_state if _current_state in ("art", "on") else "on"
-
-    # TV is on — check art mode via WebSocket
+    # TV is on — check art mode via the polling WebSocket connection
     with _tv_lock:
         try:
             art = get_art()
@@ -224,28 +249,19 @@ def on_tv_event(event) -> None:
 
 def start_event_listener() -> bool:
     """
-    Attempt to start the WebSocket event listener on the TV.
-    Captures the current art mode state first (while the socket is free),
-    then hands the connection to the listener thread.
+    Attempt to start the WebSocket event listener on the TV using a dedicated
+    connection, leaving the polling connection (_tv) free for concurrent use.
     Returns True on success, False if not supported or failed.
     """
-    with _tv_lock:
+    with _listener_lock:
         try:
-            tv = get_tv()
-            # Query art mode BEFORE start_listening() takes over the socket
-            try:
-                artmode = get_art().get_artmode()
-                initial = "art" if artmode == "on" else "on"
-                log.debug(f"Initial art mode before listener: {artmode!r}")
-                publish_state(initial)
-            except Exception as e:
-                log.debug(f"Could not read initial art mode: {e}")
+            tv = get_tv_listener()
             tv.start_listening(callback=on_tv_event)
             log.info("WebSocket event listener started.")
             return True
         except Exception as e:
             log.warning(f"Could not start event listener: {e} — will use polling only")
-            reset_tv()
+            reset_tv_listener()
             return False
 
 
@@ -429,21 +445,19 @@ def run_poll_loop() -> None:
             if not event_listening or listener_stale:
                 if event_listening and listener_stale:
                     log.debug("Refreshing WebSocket event listener (periodic restart)")
-                    reset_tv()
+                    reset_tv_listener()
                     event_listening = False
                 event_listening = start_event_listener()
                 if event_listening:
                     listener_started_at = time.monotonic()
 
-        # When the event listener owns the WebSocket, skip the art mode WS call
-        # to avoid socket conflicts — trust event-driven state instead
-        state = get_tv_state(use_websocket=not event_listening)
+        state = get_tv_state()
         publish_state(state)
 
         # If TV went off, the WebSocket listener is now dead — reset for next time
         if state == "off" and event_listening:
             log.debug("TV is off — resetting event listener flag")
-            reset_tv()
+            reset_tv_listener()
             event_listening = False
             listener_started_at = 0.0
 
