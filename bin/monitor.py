@@ -266,7 +266,7 @@ def handle_command(cmd: str) -> None:
         except Exception as e:
             log.warning(f"Command '{cmd}' failed on first attempt: {type(e).__name__}: {e} — retrying once")
             reset_tv()
-            time.sleep(3)
+            time.sleep(1)
             try:
                 if cmd == "power_on":
                     if tv_mac:
