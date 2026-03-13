@@ -9,7 +9,7 @@ Responsibilities:
 State detection:
   - REST endpoint (port 8001) tells us if the TV is on or in standby.
   - WebSocket art mode API (port 8002) tells us if art mode is active.
-  - Event-driven via start_listening() preferred; polling as fallback.
+  - Polled every POLL_INTERVAL seconds (default 5s).
 
 Usage:
     python3 monitor.py --config /path/to/samsungframe.cfg --logfile /path/to/monitor.log
@@ -42,7 +42,6 @@ except ImportError:
 
 try:
     from samsungtvws import SamsungTVWS
-    from samsungtvws.event import D2D_SERVICE_MESSAGE_EVENT
 except ImportError:
     print("ERROR: samsungtvws not installed. Run: pip3 install 'samsungtvws[encrypted]'")
     sys.exit(1)
@@ -57,13 +56,10 @@ log = logging.getLogger("samsungframe")
 _config: configparser.ConfigParser = None
 _mqtt_client: mqtt.Client = None
 _tv: SamsungTVWS = None
-_art = None                       # cached art() instance
-_tv_lock = threading.Lock()       # serialize TV access from MQTT thread + main loop
+_art = None                   # cached art() instance
+_tv_lock = threading.Lock()   # serialize TV access from MQTT thread + main loop
 
-_tv_listener: SamsungTVWS = None  # dedicated instance for start_listening()
-_listener_lock = threading.Lock() # protects _tv_listener
-
-_current_state: str = ""          # last published state: "off" / "art" / "on"
+_current_state: str = ""      # last published state: "off" / "art" / "on"
 _shutdown = threading.Event()
 
 
@@ -134,33 +130,6 @@ def reset_tv() -> None:
     _art = None
 
 
-def get_tv_listener() -> SamsungTVWS:
-    """Return (creating if needed) a dedicated SamsungTVWS instance for the event listener."""
-    global _tv_listener
-    if _tv_listener is None:
-        tv_ip = _config.get("TV", "IP")
-        tv_port = _config.getint("TV", "PORT", fallback=8002)
-        tv_name = _config.get("TV", "NAME", fallback="LoxBerry")
-        config_dir = os.path.dirname(
-            _config.get("_meta", "config_path", fallback="/tmp/samsungframe.cfg")
-        )
-        token_file = os.path.join(config_dir, "token.txt")
-        _tv_listener = SamsungTVWS(
-            host=tv_ip,
-            port=tv_port,
-            token_file=token_file,
-            timeout=5,
-            name=tv_name,
-        )
-    return _tv_listener
-
-
-def reset_tv_listener() -> None:
-    """Discard the listener instance so it is recreated on next use."""
-    global _tv_listener
-    _tv_listener = None
-
-
 def is_tv_on_rest() -> bool | None:
     """
     Check TV power state via REST (no auth, works in standby).
@@ -179,16 +148,14 @@ def is_tv_on_rest() -> bool | None:
 def get_tv_state() -> str:
     """
     Determine full TV state: "off" / "art" / "on".
-    Uses REST first, then WebSocket for art mode.
-    The polling WebSocket (_tv) is separate from the event listener (_tv_listener)
-    so both can run concurrently without conflict.
+    Uses REST first (fast, no auth), then WebSocket for art mode.
     """
     powered_on = is_tv_on_rest()
 
     if powered_on is None or not powered_on:
         return "off"
 
-    # TV is on — check art mode via the polling WebSocket connection
+    # TV is on — check art mode via WebSocket
     with _tv_lock:
         try:
             art = get_art()
@@ -218,51 +185,6 @@ def publish_state(state: str, force: bool = False) -> None:
         _current_state = state
     except Exception as e:
         log.error(f"MQTT publish failed: {e}")
-
-
-# ---------------------------------------------------------------------------
-# Event listener (preferred over polling)
-# ---------------------------------------------------------------------------
-
-def on_tv_event(event) -> None:
-    """
-    Callback fired by samsungtvws background listener thread.
-    We only care about D2D_SERVICE_MESSAGE_EVENT which carries art mode changes.
-    """
-    try:
-        if event.get("event") != D2D_SERVICE_MESSAGE_EVENT:
-            return
-        data = json.loads(event.get("data", "{}"))
-        event_type = data.get("event", "")
-        log.debug(f"D2D event: {event_type} — {data}")
-
-        if event_type in ("art_mode_changed", "artmode_status"):
-            value = data.get("value", "")
-            if value == "on":
-                publish_state("art")
-            elif value == "off":
-                # TV is on but art mode just turned off
-                publish_state("on")
-    except Exception as e:
-        log.warning(f"Error processing TV event: {e}")
-
-
-def start_event_listener() -> bool:
-    """
-    Attempt to start the WebSocket event listener on the TV using a dedicated
-    connection, leaving the polling connection (_tv) free for concurrent use.
-    Returns True on success, False if not supported or failed.
-    """
-    with _listener_lock:
-        try:
-            tv = get_tv_listener()
-            tv.start_listening(callback=on_tv_event)
-            log.info("WebSocket event listener started.")
-            return True
-        except Exception as e:
-            log.warning(f"Could not start event listener: {e} — will use polling only")
-            reset_tv_listener()
-            return False
 
 
 # ---------------------------------------------------------------------------
@@ -418,48 +340,22 @@ def setup_mqtt() -> mqtt.Client:
     return client
 
 
-LISTENER_REFRESH_INTERVAL = 600  # seconds — restart WebSocket listener periodically
-
-
 def run_poll_loop() -> None:
     """
-    Main polling loop.  Runs state checks on a configurable interval.
-    Even when event listening is active, we poll periodically as a safety net
-    (e.g. to catch power-off which doesn't generate a D2D event).
+    Main polling loop. Checks TV state every POLL_INTERVAL seconds and
+    publishes to MQTT on change.
     """
-    poll_interval = _config.getint("MONITOR", "POLL_INTERVAL", fallback=30)
-    event_listening = False
-    listener_started_at: float = 0.0
-
+    poll_interval = _config.getint("MONITOR", "POLL_INTERVAL", fallback=5)
     log.info(f"Starting poll loop (interval={poll_interval}s)")
 
     while not _shutdown.is_set():
         # Reload config on every cycle so web UI changes are picked up without restart
         config_path = _config.get("_meta", "config_path")
         _config.read(config_path)
-        poll_interval = _config.getint("MONITOR", "POLL_INTERVAL", fallback=30)
-
-        if is_tv_on_rest():
-            now = time.monotonic()
-            listener_stale = (now - listener_started_at) > LISTENER_REFRESH_INTERVAL
-            if not event_listening or listener_stale:
-                if event_listening and listener_stale:
-                    log.debug("Refreshing WebSocket event listener (periodic restart)")
-                    reset_tv_listener()
-                    event_listening = False
-                event_listening = start_event_listener()
-                if event_listening:
-                    listener_started_at = time.monotonic()
+        poll_interval = _config.getint("MONITOR", "POLL_INTERVAL", fallback=5)
 
         state = get_tv_state()
         publish_state(state)
-
-        # If TV went off, the WebSocket listener is now dead — reset for next time
-        if state == "off" and event_listening:
-            log.debug("TV is off — resetting event listener flag")
-            reset_tv_listener()
-            event_listening = False
-            listener_started_at = 0.0
 
         _shutdown.wait(timeout=poll_interval)
 
