@@ -1,0 +1,6 @@
+www-data ALL=(ALL) NOPASSWD: /bin/systemctl restart samsungframe.service
+www-data ALL=(ALL) NOPASSWD: /bin/systemctl stop samsungframe.service
+www-data ALL=(ALL) NOPASSWD: /bin/systemctl start samsungframe.service
+loxberry ALL=(ALL) NOPASSWD: /bin/systemctl restart samsungframe.service
+loxberry ALL=(ALL) NOPASSWD: /bin/systemctl stop samsungframe.service
+loxberry ALL=(ALL) NOPASSWD: /bin/systemctl start samsungframe.service

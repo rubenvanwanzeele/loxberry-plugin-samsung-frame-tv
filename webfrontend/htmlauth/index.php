@@ -59,6 +59,13 @@ $message_type = "info";  // "info" | "success" | "error"
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
     $action = $_POST["action"] ?? "";
 
+    // --- Restart daemon ---
+    if ($action === "restart_daemon") {
+        $out = shell_exec("sudo /bin/systemctl restart samsungframe.service 2>&1");
+        $message = "Daemon restarted." . ($out ? " ($out)" : "");
+        $message_type = "success";
+    }
+
     // --- Save configuration ---
     if ($action === "save_config") {
         $tv_ip  = trim($_POST["tv_ip"]  ?? "");
@@ -259,6 +266,10 @@ pre.sf-pre {
             <a href="" style="font-size:.9em">Refresh</a>
         </small>
     </p>
+    <form method="post" style="display:inline">
+        <input type="hidden" name="action" value="restart_daemon">
+        <button type="submit" class="sf-btn sf-btn-warning">Restart Daemon</button>
+    </form>
 </div>
 
 <!-- =====================================================================

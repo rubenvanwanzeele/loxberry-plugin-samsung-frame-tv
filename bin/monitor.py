@@ -366,6 +366,11 @@ def run_poll_loop() -> None:
 
     # Try to start the WebSocket event listener once the TV is reachable
     while not _shutdown.is_set():
+        # Reload config on every cycle so web UI changes are picked up without restart
+        config_path = _config.get("_meta", "config_path")
+        _config.read(config_path)
+        poll_interval = _config.getint("MONITOR", "POLL_INTERVAL", fallback=30)
+
         if not event_listening and is_tv_on_rest():
             event_listening = start_event_listener()
 
