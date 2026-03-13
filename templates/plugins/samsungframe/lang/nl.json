@@ -1,0 +1,60 @@
+{
+  "PLUGIN": {
+    "TITLE": "Samsung Frame TV",
+    "DESCRIPTION": "Lokale integratie tussen Samsung The Frame TV en Loxone via MQTT"
+  },
+  "UI": {
+    "LIVE_STATUS": "Live TV-status",
+    "CONFIGURATION": "Configuratie",
+    "PAIRING": "TV koppelen",
+    "TEST_CONTROLS": "Testbediening",
+    "SAVE_CONFIG": "Configuratie opslaan",
+    "START_PAIRING": "Koppeling starten",
+    "REFRESH": "Vernieuwen"
+  },
+  "STATE": {
+    "OFF": "Uit",
+    "ART": "Kunstmodus",
+    "ON": "Aan (actief)",
+    "UNKNOWN": "Onbekend"
+  },
+  "FIELDS": {
+    "TV_IP": "IP-adres TV",
+    "TV_MAC": "MAC-adres TV",
+    "TV_PORT": "WebSocket-poort",
+    "TV_NAME": "Verbindingsnaam",
+    "MQTT_HOST": "MQTT-host",
+    "MQTT_PORT": "MQTT-poort",
+    "STATE_TOPIC": "Status-topic",
+    "CMD_TOPIC": "Opdracht-topic",
+    "POLL_INTERVAL": "Pollinginterval (seconden)",
+    "LOGLEVEL": "Logniveau"
+  },
+  "HINTS": {
+    "TV_MAC": "Automatisch ontdekt via ARP bij opslaan",
+    "TV_NAME": "Wordt getoond in het koppelingsvenster op de TV",
+    "STATE_TOPIC": "plugin → Loxone",
+    "CMD_TOPIC": "Loxone → plugin",
+    "POLL_INTERVAL": "Terugval wanneer WebSocket wegvalt"
+  },
+  "COMMANDS": {
+    "POWER_ON": "Inschakelen",
+    "POWER_OFF": "Uitschakelen",
+    "ART_ON": "Kunstmodus aan",
+    "ART_OFF": "Kunstmodus uit",
+    "MUTE": "Dempen",
+    "VOL_UP": "Vol +",
+    "VOL_DOWN": "Vol -",
+    "HOME": "Home",
+    "BACK": "Terug",
+    "OK": "OK",
+    "SEND": "Versturen"
+  },
+  "MESSAGES": {
+    "CONFIG_SAVED": "Configuratie opgeslagen.",
+    "PAIRING_SUCCESS": "Koppeling geslaagd! Token opgeslagen.",
+    "PAIRING_FAILED": "Koppeling mislukt. Zie details hieronder.",
+    "PAIRING_CONFIRM": "Zorg dat de TV aan staat en een beeld toont. Accepteer het venster op de TV. Doorgaan?",
+    "CMD_SENT": "Opdracht verzonden."
+  }
+}

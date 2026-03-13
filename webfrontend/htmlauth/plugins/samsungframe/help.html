@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Samsung Frame TV – Help</title>
+</head>
+<body>
+
+<h2>Samsung Frame TV Plugin – Help</h2>
+
+<h3>Overview</h3>
+<p>
+    This plugin provides two-way local integration between a Samsung The Frame TV and
+    Loxone via MQTT. No cloud or SmartThings account is required — all communication
+    is direct over your local network.
+</p>
+
+<h3>Initial Setup</h3>
+<ol>
+    <li>Enter the <strong>TV IP address</strong> in the Configuration section and click
+        <em>Save Configuration</em>. The TV's MAC address will be discovered automatically.</li>
+    <li>Make sure the TV is powered on and displaying a picture.</li>
+    <li>Click <strong>Start Pairing</strong>. A popup will appear on the TV — accept it
+        within 30 seconds. The pairing token is saved and reused automatically.</li>
+    <li>The monitor daemon starts automatically when LoxBerry boots. After pairing, it
+        will begin publishing TV state to MQTT.</li>
+</ol>
+
+<h3>TV States</h3>
+<table border="1" cellpadding="6" cellspacing="0">
+    <tr><th>State</th><th>Meaning</th></tr>
+    <tr><td><code>off</code></td><td>TV is in standby</td></tr>
+    <tr><td><code>art</code></td><td>TV is on and Art Mode is active</td></tr>
+    <tr><td><code>on</code></td><td>TV is on and showing normal content</td></tr>
+</table>
+<p>State is published (retained) to the configured MQTT state topic.</p>
+
+<h3>MQTT Commands</h3>
+<p>Publish any of the following payloads to the command topic:</p>
+<table border="1" cellpadding="6" cellspacing="0">
+    <tr><th>Payload</th><th>Action</th></tr>
+    <tr><td><code>power_on</code></td><td>Wake TV from standby (WebSocket or Wake-on-LAN)</td></tr>
+    <tr><td><code>power_off</code></td><td>Hold power button 3 s — powers off the TV</td></tr>
+    <tr><td><code>art_on</code></td><td>Enable Art Mode</td></tr>
+    <tr><td><code>art_off</code></td><td>Disable Art Mode</td></tr>
+    <tr><td><code>key_KEY_MUTE</code></td><td>Send the MUTE key</td></tr>
+    <tr><td><code>key_KEY_VOLUP</code></td><td>Send the VOLUME UP key</td></tr>
+    <tr><td><code>key_KEY_VOLDOWN</code></td><td>Send the VOLUME DOWN key</td></tr>
+    <tr><td><code>key_XXXX</code></td><td>Send any raw Samsung remote key</td></tr>
+</table>
+
+<h3>Loxone Integration</h3>
+<p>
+    In Loxone Config, use a <strong>Virtual Input</strong> (text input) listening on the
+    state topic to react to TV state changes. Use a <strong>Virtual Output</strong>
+    publishing to the command topic to send commands from Loxone.
+</p>
+
+<h3>Troubleshooting</h3>
+<ul>
+    <li><strong>Pairing fails / no popup on TV:</strong> Ensure developer mode is enabled
+        on the TV (Settings → Support → Device Care → Developer Mode).</li>
+    <li><strong>Art mode not detected:</strong> Art mode API requires a 2024 or later
+        firmware. Update the TV firmware and retry.</li>
+    <li><strong>State stuck at "unknown":</strong> The daemon may not be running. Check
+        the log at <code>/opt/loxberry/log/plugins/samsungframe/monitor.log</code>.</li>
+    <li><strong>Wake-on-LAN not working:</strong> Ensure the MAC address is correct and
+        that the TV is on wired Ethernet.</li>
+</ul>
+
+</body>
+</html>

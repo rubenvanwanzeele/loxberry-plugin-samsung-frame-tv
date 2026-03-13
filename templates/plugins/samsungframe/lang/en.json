@@ -1,0 +1,60 @@
+{
+  "PLUGIN": {
+    "TITLE": "Samsung Frame TV",
+    "DESCRIPTION": "Local integration between Samsung The Frame TV and Loxone via MQTT"
+  },
+  "UI": {
+    "LIVE_STATUS": "Live TV Status",
+    "CONFIGURATION": "Configuration",
+    "PAIRING": "TV Pairing",
+    "TEST_CONTROLS": "Test Controls",
+    "SAVE_CONFIG": "Save Configuration",
+    "START_PAIRING": "Start Pairing",
+    "REFRESH": "Refresh"
+  },
+  "STATE": {
+    "OFF": "Off",
+    "ART": "Art Mode",
+    "ON": "On (Active)",
+    "UNKNOWN": "Unknown"
+  },
+  "FIELDS": {
+    "TV_IP": "TV IP Address",
+    "TV_MAC": "TV MAC Address",
+    "TV_PORT": "WebSocket Port",
+    "TV_NAME": "Connection Name",
+    "MQTT_HOST": "MQTT Host",
+    "MQTT_PORT": "MQTT Port",
+    "STATE_TOPIC": "State Topic",
+    "CMD_TOPIC": "Command Topic",
+    "POLL_INTERVAL": "Poll Interval (seconds)",
+    "LOGLEVEL": "Log Level"
+  },
+  "HINTS": {
+    "TV_MAC": "Auto-discovered via ARP on save",
+    "TV_NAME": "Shown on TV pairing popup",
+    "STATE_TOPIC": "plugin → Loxone",
+    "CMD_TOPIC": "Loxone → plugin",
+    "POLL_INTERVAL": "Fallback when WebSocket drops"
+  },
+  "COMMANDS": {
+    "POWER_ON": "Power On",
+    "POWER_OFF": "Power Off",
+    "ART_ON": "Art Mode On",
+    "ART_OFF": "Art Mode Off",
+    "MUTE": "Mute",
+    "VOL_UP": "Vol +",
+    "VOL_DOWN": "Vol -",
+    "HOME": "Home",
+    "BACK": "Back",
+    "OK": "OK",
+    "SEND": "Send"
+  },
+  "MESSAGES": {
+    "CONFIG_SAVED": "Configuration saved.",
+    "PAIRING_SUCCESS": "Pairing successful! Token saved.",
+    "PAIRING_FAILED": "Pairing failed. See details below.",
+    "PAIRING_CONFIRM": "Make sure the TV is powered on and showing a picture. Accept the popup on the TV. Proceed?",
+    "CMD_SENT": "Command sent."
+  }
+}

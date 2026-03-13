@@ -1,0 +1,22 @@
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# LoxBerry runtime files (never commit the pairing token)
+config/samsungframe/token.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Build / packaging
+*.zip
+dist/
+
+# OS
+.DS_Store
+Thumbs.db
