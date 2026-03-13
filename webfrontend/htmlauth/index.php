@@ -299,7 +299,7 @@ pre.sf-pre {
             &nbsp;|&nbsp;
             <a href="index.php" style="font-size:.9em">Refresh</a>
             &nbsp;|&nbsp;
-            <span id="sf-updated-label" style="font-size:.9em;color:#aaa">updated at <?= date('H:i:s') ?></span>
+            <span id="sf-updated-label" style="font-size:.9em;color:#aaa">updated at <?= date('H:i:s') ?> (every 5s)</span>
         </small>
     </p>
     <form method="post" style="display:inline">
@@ -332,7 +332,7 @@ pre.sf-pre {
             })
             .catch(function() {});
     }
-    setInterval(refreshState, 10000);
+    setInterval(refreshState, 5000);
     <?php if ($refresh_after_cmd): ?>
     // Command was just sent — refresh at 3s and 6s to catch the TV reacting
     setTimeout(refreshState, 3000);
