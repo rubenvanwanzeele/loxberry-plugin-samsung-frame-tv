@@ -232,6 +232,20 @@ LBWeb::lbheader("Samsung Frame TV", "samsungframe", "help.html");
 
 ---
 
+## LoxBerry 3 Plugin Gotchas (learned the hard way)
+
+- **Directory doubling**: LoxBerry prepends `plugins/FOLDER/` automatically. Never add an extra `samsungframe/` inside `bin/`, `config/`, `webfrontend/htmlauth/`, or `templates/`. A file at `bin/monitor.py` lands at `$LBPBIN/monitor.py`. A file at `bin/samsungframe/monitor.py` lands at `$LBPBIN/samsungframe/monitor.py` — wrong.
+- **`$cfg` is reserved**: LoxBerry's `loxberry_system.php` sets a global `$cfg` (stdClass). Use `$plugin_cfg` or any other name for your own config variable.
+- **MQTT credentials**: Not in a dedicated file — in `/opt/loxberry/config/system/general.json` under `Mqtt.Brokeruser` / `Mqtt.Brokerpass`. In PHP use `mqtt_connectiondetails()` from `loxberry_io.php`.
+- **No daemon/ scripts in LoxBerry 3**: LoxBerry 3 is systemd-based (DietPi). Create a systemd service in `postroot.sh` instead.
+- **`postroot.sh` runs as root**: Use it for systemd, sudoers, and any system-level setup. `postinstall.sh` runs as the `loxberry` user.
+- **Config is overwritten on upgrade**: LoxBerry replaces config files on every install. Back up in `preupgrade.sh`, restore in `postupgrade.sh`.
+- **4 icon sizes required**: `icon_64.png`, `icon_128.png`, `icon_256.png`, `icon_512.png`. Missing sizes cause install warnings.
+- **Blank PHP page = suppressed fatal error**: Add `error_reporting(E_ALL); ini_set('display_errors', 1);` at the top to diagnose. Remove before release.
+- **journalctl unavailable**: The `loxberry` user has no journal read access. Use file-based logging in all daemons.
+
+---
+
 ## Reference Links
 
 - LoxBerry plugin basics: https://wiki.loxberry.de/en/entwickler/grundlagen_zur_erstellung_eines_plugins
