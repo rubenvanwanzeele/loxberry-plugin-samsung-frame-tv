@@ -35,7 +35,7 @@ No cloud. No SmartThings. Direct local control only.
 In LoxBerry: **System → Plugin Manager → Install from URL**
 
 ```
-https://github.com/rubenvanwanzeele/loxberry-plugin-samsung-frame-tv/archive/refs/heads/master.zip
+https://github.com/rubenvanwanzeele/loxberry-plugin-samsung-frame-tv/archive/refs/tags/v1.0.0.zip
 ```
 
 Python dependencies (`samsungtvws`, `paho-mqtt`, `wakeonlan`) are installed automatically.
