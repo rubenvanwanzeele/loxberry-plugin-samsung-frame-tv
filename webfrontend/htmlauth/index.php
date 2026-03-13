@@ -66,6 +66,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'status') {
              . " -C 1 -W 2 2>/dev/null";
     $sub_result = trim(shell_exec($sub_cmd) ?? "");
     header('Content-Type: application/json');
+    header('Cache-Control: no-store, no-cache, must-revalidate');
+    header('Pragma: no-cache');
     echo json_encode([
         'state'   => $sub_result !== "" ? $sub_result : "unknown",
         'updated' => date('H:i:s'),
@@ -312,7 +314,7 @@ pre.sf-pre {
     var stateColors = {"off":"#e74c3c","art":"#9b59b6","on":"#2ecc71","unknown":"#95a5a6"};
     var stateLabels = {"off":"Off","art":"Art Mode","on":"On (Active)","unknown":"Unknown"};
     function refreshState() {
-        fetch('index.php?ajax=status')
+        fetch('index.php?ajax=status&_=' + Date.now())
             .then(function(r) { return r.json(); })
             .then(function(data) {
                 var state = data.state || 'unknown';
