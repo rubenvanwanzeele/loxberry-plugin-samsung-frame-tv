@@ -251,6 +251,23 @@ function sf_mqtt_publish($topic, $payload, $mqtt_host, $mqtt_port, $mqtt_auth) {
     return trim((string)shell_exec($cmd));
 }
 
+function read_log_tail($path, $line_count = 80) {
+    $line_count = max(20, min(500, intval($line_count)));
+    if (!is_readable($path)) {
+        return "Log file is not readable: $path";
+    }
+
+    $cmd = 'tail -n ' . escapeshellarg((string)$line_count)
+         . ' ' . escapeshellarg($path)
+         . ' 2>&1';
+    $output = shell_exec($cmd);
+    if ($output === null || $output === '') {
+        return 'No log output available.';
+    }
+
+    return trim((string)$output);
+}
+
 function find_device($devices, $device_id) {
     foreach ($devices as $device) {
         if ($device['device_id'] === $device_id) {
@@ -459,6 +476,10 @@ foreach ($devices as $device) {
     ];
 }
 
+$log_tail_lines = isset($_GET['log_lines']) ? intval($_GET['log_lines']) : 80;
+$log_tail_lines = max(20, min(500, $log_tail_lines));
+$log_tail_text = read_log_tail($logfile, $log_tail_lines);
+
 LBWeb::lbheader('Samsung Frame TV', $pluginname, 'help.html');
 ?>
 <style>
@@ -566,6 +587,23 @@ LBWeb::lbheader('Samsung Frame TV', $pluginname, 'help.html');
             <button type="submit" class="sf-btn sf-btn-warning" title="Open plugin help and MQTT reference">Open Help</button>
         </form>
     </div>
+</div>
+
+<div class="sf-card">
+    <h3>Recent Log Lines</h3>
+    <p class="sf-muted">
+        Showing the last <?= h($log_tail_lines) ?> lines from <code><?= h($logfile) ?></code>.
+    </p>
+    <form method="get" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:10px;">
+        <label for="sf-log-lines" style="font-weight:600;">Lines</label>
+        <select id="sf-log-lines" name="log_lines" style="padding:6px 8px; border:1px solid #ccc; border-radius:4px;">
+            <?php foreach ([40, 80, 120, 200, 300] as $lines): ?>
+            <option value="<?= h($lines) ?>" <?= $log_tail_lines === $lines ? 'selected' : '' ?>><?= h($lines) ?></option>
+            <?php endforeach; ?>
+        </select>
+        <button type="submit" class="sf-btn sf-btn-grey">Refresh Log</button>
+    </form>
+    <pre class="sf-pre" style="max-height:320px;"><?= h($log_tail_text) ?></pre>
 </div>
 
 <div class="sf-card">
