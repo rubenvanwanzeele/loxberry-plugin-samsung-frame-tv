@@ -590,23 +590,6 @@ LBWeb::lbheader('Samsung Frame TV', $pluginname, 'help.html');
 </div>
 
 <div class="sf-card">
-    <h3>Recent Log Lines</h3>
-    <p class="sf-muted">
-        Showing the last <?= h($log_tail_lines) ?> lines from <code><?= h($logfile) ?></code>.
-    </p>
-    <form method="get" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:10px;">
-        <label for="sf-log-lines" style="font-weight:600;">Lines</label>
-        <select id="sf-log-lines" name="log_lines" style="padding:6px 8px; border:1px solid #ccc; border-radius:4px;">
-            <?php foreach ([40, 80, 120, 200, 300] as $lines): ?>
-            <option value="<?= h($lines) ?>" <?= $log_tail_lines === $lines ? 'selected' : '' ?>><?= h($lines) ?></option>
-            <?php endforeach; ?>
-        </select>
-        <button type="submit" class="sf-btn sf-btn-grey">Refresh Log</button>
-    </form>
-    <pre class="sf-pre" style="max-height:320px;"><?= h($log_tail_text) ?></pre>
-</div>
-
-<div class="sf-card">
     <h3>Quick Test Commands (Any TV)</h3>
     <p class="sf-muted">Select an enabled target TV and send a test command to that specific device topic.</p>
     <?php if (empty($enabled_devices)): ?>
@@ -830,6 +813,23 @@ LBWeb::lbheader('Samsung Frame TV', $pluginname, 'help.html');
     </div>
 </div>
 <?php endif; ?>
+
+<div class="sf-card">
+    <h3>Recent Log Lines</h3>
+    <p class="sf-muted">
+        Showing the last <?= h($log_tail_lines) ?> lines from <code><?= h($logfile) ?></code>.
+    </p>
+    <form method="get" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:10px;">
+        <label for="sf-log-lines" style="font-weight:600;">Lines</label>
+        <select id="sf-log-lines" name="log_lines" style="padding:6px 8px; border:1px solid #ccc; border-radius:4px;">
+            <?php foreach ([40, 80, 120, 200, 300] as $lines): ?>
+            <option value="<?= h($lines) ?>" <?= $log_tail_lines === $lines ? 'selected' : '' ?>><?= h($lines) ?></option>
+            <?php endforeach; ?>
+        </select>
+        <button type="submit" class="sf-btn sf-btn-grey">Refresh Log</button>
+    </form>
+    <pre class="sf-pre" style="max-height:320px;"><?= h($log_tail_text) ?></pre>
+</div>
 
 <script>
 (function() {
