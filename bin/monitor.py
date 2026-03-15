@@ -254,7 +254,9 @@ class DeviceRuntime:
                 log.info(self.prefix(f"power_off ignored: TV already reports off{suffix}"))
                 self.clear_pending_power()
                 self.reset_tv()
-                self.publish_state("off", force=True)
+                # Avoid noisy duplicate retained publishes when state is already known as off.
+                if self.current_state != "off":
+                    self.publish_state("off", force=True)
                 return
 
             self.get_tv().hold_key("KEY_POWER", 3)
@@ -474,6 +476,11 @@ def on_mqtt_disconnect(client, userdata, rc) -> None:
 
 def on_mqtt_message(client, userdata, msg) -> None:
     payload = msg.payload.decode("utf-8", errors="ignore").strip()
+
+    if payload == "":
+        log.debug(f"[system] Ignoring empty MQTT payload on {msg.topic}")
+        return
+
     targets = _topic_targets.get(msg.topic, [])
 
     if not targets:
