@@ -2,12 +2,7 @@
 """
 pair.py — One-shot pairing helper for Samsung Frame TV plugin.
 
-Called from the web UI to initiate WebSocket pairing with the TV.
-The TV will show a popup asking the user to allow the connection.
-On success, the token is saved to the token file and reused by monitor.py.
-
-Usage:
-    python3 pair.py --config /path/to/samsungframe.cfg
+Supports pairing the legacy default TV and additional multi-TV device sections.
 """
 
 import argparse
@@ -17,30 +12,69 @@ import sys
 import time
 
 
-def lb_path(var: str) -> str:
-    return os.popen(
-        f"perl -e 'use LoxBerry::System; print ${var}; exit;'"
-    ).read().strip()
+def sanitize_device_id(value: str) -> str:
+    cleaned = "".join(ch.lower() if ch.isalnum() else "_" for ch in value.strip())
+    while "__" in cleaned:
+        cleaned = cleaned.replace("__", "_")
+    cleaned = cleaned.strip("_")
+    cleaned = cleaned or "default"
+    if cleaned == "all":
+        cleaned = "tv_all"
+    return cleaned
+
+
+def token_file_for_device(config_dir: str, device_id: str) -> str:
+    if device_id == "default":
+        return os.path.join(config_dir, "token.txt")
+    return os.path.join(config_dir, f"token_{device_id}.txt")
+
+
+def load_device(cfg: configparser.ConfigParser, device_id: str):
+    device_id = sanitize_device_id(device_id)
+    section = f"DEVICE_{device_id}"
+
+    if cfg.has_section(section):
+        return {
+            "device_id": device_id,
+            "label": cfg.get(section, "LABEL", fallback=device_id) or device_id,
+            "ip": cfg.get(section, "IP", fallback="").strip(),
+            "port": cfg.getint(section, "PORT", fallback=8002),
+            "name": cfg.get(section, "NAME", fallback="LoxBerry") or "LoxBerry",
+        }
+
+    if device_id == "default":
+        return {
+            "device_id": "default",
+            "label": cfg.get("TV", "LABEL", fallback="Primary TV") or "Primary TV",
+            "ip": cfg.get("TV", "IP", fallback="").strip(),
+            "port": cfg.getint("TV", "PORT", fallback=8002),
+            "name": cfg.get("TV", "NAME", fallback="LoxBerry") or "LoxBerry",
+        }
+
+    return None
 
 
 def main():
     parser = argparse.ArgumentParser(description="Samsung Frame TV pairing helper")
     parser.add_argument("--config", required=True, help="Path to samsungframe.cfg")
+    parser.add_argument("--device", default="default", help="Device ID to pair (default: primary legacy TV)")
     args = parser.parse_args()
 
     cfg = configparser.ConfigParser()
     cfg.read(args.config)
 
-    tv_ip = cfg.get("TV", "IP", fallback="192.168.1.43")
-    tv_port = cfg.getint("TV", "PORT", fallback=8002)
-    tv_name = cfg.get("TV", "NAME", fallback="LoxBerry")
+    requested_device_id = sanitize_device_id(args.device)
+    device = load_device(cfg, requested_device_id)
+    if not device:
+        print(f"ERROR: Device {requested_device_id!r} not found in config.")
+        sys.exit(2)
 
-    # Token file lives next to the config file
     config_dir = os.path.dirname(args.config)
-    token_file = os.path.join(config_dir, "token.txt")
+    token_file = token_file_for_device(config_dir, device["device_id"])
 
-    print(f"Connecting to Samsung TV at {tv_ip}:{tv_port} ...")
-    print(f"Token will be saved to: {token_file}")
+    prefix = f"[{device['label']}]"
+    print(f"{prefix} Connecting to Samsung TV at {device['ip']}:{device['port']} ...")
+    print(f"{prefix} Token will be saved to: {token_file}")
     print()
 
     try:
@@ -51,41 +85,39 @@ def main():
 
     try:
         tv = SamsungTVWS(
-            host=tv_ip,
-            port=tv_port,
+            host=device["ip"],
+            port=device["port"],
             token_file=token_file,
             timeout=10,
-            name=tv_name,
+            name=device["name"],
         )
 
-        # Opening the connection triggers pairing popup on the TV.
-        # The user must accept it within ~30 seconds.
-        print("A popup should appear on your TV — please accept the connection request.")
-        print("Waiting up to 30 seconds for acceptance...")
+        print(f"{prefix} A popup should appear on your TV — please accept the connection request.")
+        print(f"{prefix} Waiting up to 30 seconds for acceptance...")
 
         tv.open()
         time.sleep(2)
         tv.close()
 
         if os.path.exists(token_file):
-            with open(token_file) as f:
-                token = f.read().strip()
-            print(f"SUCCESS: Pairing complete. Token saved: {token}")
-            sys.exit(0)
-        else:
-            print("WARNING: Connection succeeded but no token file was created.")
-            print("The TV may not require token auth, or pairing was not accepted.")
+            with open(token_file) as handle:
+                token = handle.read().strip()
+            print(f"SUCCESS: {prefix} Pairing complete. Token saved: {token}")
             sys.exit(0)
 
+        print(f"WARNING: {prefix} Connection succeeded but no token file was created.")
+        print(f"{prefix} The TV may not require token auth, or pairing was not accepted.")
+        sys.exit(0)
+
     except ConnectionRefusedError:
-        print(f"ERROR: Connection refused to {tv_ip}:{tv_port}.")
-        print("Check that the TV is on and the IP address is correct.")
+        print(f"ERROR: {prefix} Connection refused to {device['ip']}:{device['port']}.")
+        print(f"{prefix} Check that the TV is on and the IP address is correct.")
         sys.exit(2)
     except TimeoutError:
-        print("ERROR: Connection timed out. Make sure the TV is powered on and reachable.")
+        print(f"ERROR: {prefix} Connection timed out. Make sure the TV is powered on and reachable.")
         sys.exit(2)
-    except Exception as e:
-        print(f"ERROR: {type(e).__name__}: {e}")
+    except Exception as exc:
+        print(f"ERROR: {prefix} {type(exc).__name__}: {exc}")
         sys.exit(2)
 
 

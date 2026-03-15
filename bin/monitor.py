@@ -2,17 +2,13 @@
 """
 monitor.py — Main daemon for Samsung Frame TV LoxBerry plugin.
 
-Responsibilities:
-  1. Subscribe to MQTT command topic and forward commands to the TV.
-  2. Monitor TV state (off / art / on) and publish to MQTT state topic.
-
-State detection:
-  - REST endpoint (port 8001) tells us if the TV is on or in standby.
-  - WebSocket art mode API (port 8002) tells us if art mode is active.
-  - Polled every POLL_INTERVAL seconds (default 5s).
-
-Usage:
-    python3 monitor.py --config /path/to/samsungframe.cfg --logfile /path/to/monitor.log
+Supports one or more TVs while staying backward compatible with v1.0.0:
+  - Primary TV still uses the legacy MQTT topics from [MQTT].
+  - Every configured TV also gets its own device topic suffix:
+      <STATE_TOPIC>/<device_id>
+      <CMD_TOPIC>/<device_id>
+  - Broadcast commands can be sent to:
+      <CMD_TOPIC>/all
 """
 
 import argparse
@@ -24,7 +20,9 @@ import signal
 import sys
 import threading
 import time
+from dataclasses import dataclass, field
 from logging.handlers import RotatingFileHandler
+from typing import Dict, List, Optional, Tuple
 
 import requests
 
@@ -47,278 +45,375 @@ except ImportError:
     sys.exit(1)
 
 
-# ---------------------------------------------------------------------------
-# Globals (set up after config is loaded)
-# ---------------------------------------------------------------------------
+LEGACY_STATE_TOPIC = "loxberry/plugin/samsungframe/state"
+LEGACY_CMD_TOPIC = "loxberry/plugin/samsungframe/cmd"
 
 log = logging.getLogger("samsungframe")
 
-_config: configparser.ConfigParser = None
-_mqtt_client: mqtt.Client = None
-_tv: SamsungTVWS = None
-_art = None                   # cached art() instance
-_tv_lock = threading.Lock()   # serialize TV access from MQTT thread + main loop
-
-_current_state: str = ""      # last published state: "off" / "art" / "on"
+_mqtt_client = None
+_runtime_config = None
+_devices: Dict[str, "DeviceRuntime"] = {}
+_topic_targets: Dict[str, List[str]] = {}
+_broadcast_cmd_topic = ""
 _shutdown = threading.Event()
 
 
-# ---------------------------------------------------------------------------
-# Logging
-# ---------------------------------------------------------------------------
+@dataclass
+class DeviceConfig:
+    device_id: str
+    label: str
+    ip: str
+    mac: str
+    port: int
+    name: str
+    enabled: bool = True
+
+
+@dataclass
+class RuntimeConfig:
+    config_path: str
+    config_dir: str
+    legacy_state_topic: str
+    legacy_cmd_topic: str
+    primary_device_id: str
+    poll_interval: int
+    loglevel: int
+    devices: List[DeviceConfig]
+
+
+@dataclass
+class DeviceRuntime:
+    cfg: DeviceConfig
+    token_file: str
+    state_topic: str
+    cmd_topic: str
+    is_primary: bool = False
+    current_state: str = ""
+    tv: Optional[SamsungTVWS] = None
+    art = None
+    lock: threading.Lock = field(default_factory=threading.Lock)
+
+    def prefix(self, message: str) -> str:
+        reference = self.cfg.label or self.cfg.device_id
+        return f"[{reference}] {message}"
+
+    def get_tv(self) -> SamsungTVWS:
+        if self.tv is None:
+            self.tv = SamsungTVWS(
+                host=self.cfg.ip,
+                port=self.cfg.port,
+                token_file=self.token_file,
+                timeout=5,
+                name=self.cfg.name,
+            )
+            self.art = None
+        return self.tv
+
+    def get_art(self):
+        if self.art is None:
+            self.art = self.get_tv().art()
+        return self.art
+
+    def reset_tv(self) -> None:
+        self.tv = None
+        self.art = None
+
+    def is_tv_on_rest(self) -> Optional[bool]:
+        if not self.cfg.ip:
+            log.debug(self.prefix("REST check skipped: no IP configured"))
+            return None
+        try:
+            response = requests.get(f"http://{self.cfg.ip}:8001/api/v2/", timeout=3)
+            power = response.json().get("device", {}).get("PowerState", "standby")
+            return power != "standby"
+        except Exception as exc:
+            log.debug(self.prefix(f"REST check failed: {exc}"))
+            return None
+
+    def get_state(self) -> str:
+        powered_on = self.is_tv_on_rest()
+        if powered_on is None or not powered_on:
+            return "off"
+
+        with self.lock:
+            try:
+                artmode = self.get_art().get_artmode()
+                log.debug(self.prefix(f"Art mode query result: {artmode!r}"))
+                return "art" if artmode == "on" else "on"
+            except Exception as exc:
+                log.warning(self.prefix(f"Art mode check failed ({type(exc).__name__}: {exc}) — assuming 'on'"))
+                self.reset_tv()
+                return "on"
+
+    def publish_state(self, state: str, force: bool = False) -> None:
+        if state == self.current_state and not force:
+            return
+
+        publish_targets = [self.state_topic]
+        if self.is_primary:
+            publish_targets.append(_runtime_config.legacy_state_topic)
+
+        for topic in publish_targets:
+            try:
+                _mqtt_client.publish(topic, state, qos=1, retain=True)
+                mirror_note = " (legacy mirror)" if self.is_primary and topic == _runtime_config.legacy_state_topic else ""
+                log.info(self.prefix(f"State published: {state!r} → {topic}{mirror_note}"))
+            except Exception as exc:
+                log.error(self.prefix(f"MQTT publish failed for {topic}: {exc}"))
+
+        self.current_state = state
+
+    def handle_command(self, cmd: str) -> None:
+        with self.lock:
+            try:
+                self._handle_command_once(cmd)
+            except Exception as exc:
+                log.warning(self.prefix(
+                    f"Command {cmd!r} failed on first attempt: {type(exc).__name__}: {exc} — retrying once"
+                ))
+                self.reset_tv()
+                time.sleep(1)
+                try:
+                    self._handle_command_once(cmd, retry=True)
+                except Exception as retry_exc:
+                    log.error(self.prefix(
+                        f"Command {cmd!r} failed after retry: {type(retry_exc).__name__}: {retry_exc}"
+                    ))
+                    self.reset_tv()
+
+    def _handle_command_once(self, cmd: str, retry: bool = False) -> None:
+        suffix = " (retry)" if retry else ""
+
+        if cmd == "power_on":
+            try:
+                self.get_tv().send_key("KEY_POWER")
+                log.info(self.prefix(f"Sent KEY_POWER via WebSocket (power on){suffix}"))
+            except Exception:
+                self.reset_tv()
+                if self.cfg.mac:
+                    wakeonlan.send_magic_packet(self.cfg.mac)
+                    log.info(self.prefix(f"Sent Wake-on-LAN to {self.cfg.mac}{suffix}"))
+                else:
+                    log.warning(self.prefix(f"power_on: WebSocket failed and no MAC configured for WOL{suffix}"))
+
+        elif cmd == "power_off":
+            self.get_tv().hold_key("KEY_POWER", 3)
+            log.info(self.prefix(f"Sent KEY_POWER hold 3s (power off){suffix}"))
+
+        elif cmd == "art_on":
+            self.get_art().set_artmode("on")
+            log.info(self.prefix(f"Art mode enabled{suffix}"))
+            self.publish_state("art", force=True)
+
+        elif cmd == "art_off":
+            self.get_art().set_artmode("off")
+            log.info(self.prefix(f"Art mode disabled{suffix}"))
+            self.publish_state("on", force=True)
+
+        elif cmd.startswith("key_"):
+            key = cmd[4:].upper()
+            if not key.startswith("KEY_"):
+                key = "KEY_" + key
+            self.get_tv().send_key(key)
+            log.info(self.prefix(f"Sent key: {key}{suffix}"))
+
+        else:
+            log.warning(self.prefix(f"Unknown command: {cmd!r}"))
+
 
 def setup_logging(logfile: str, loglevel: int) -> None:
-    level_map = {1: logging.CRITICAL, 2: logging.ERROR, 3: logging.WARNING,
-                 4: logging.INFO, 5: logging.DEBUG, 6: logging.DEBUG}
+    level_map = {
+        1: logging.CRITICAL,
+        2: logging.ERROR,
+        3: logging.WARNING,
+        4: logging.INFO,
+        5: logging.DEBUG,
+        6: logging.DEBUG,
+    }
     level = level_map.get(loglevel, logging.INFO)
+    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 
-    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s",
-                             datefmt="%Y-%m-%d %H:%M:%S")
-
-    # Rotating file handler (5 MB, keep 3 backups)
     os.makedirs(os.path.dirname(logfile), exist_ok=True)
-    fh = RotatingFileHandler(logfile, maxBytes=5 * 1024 * 1024, backupCount=3)
-    fh.setFormatter(fmt)
 
-    sh = logging.StreamHandler(sys.stdout)
-    sh.setFormatter(fmt)
+    file_handler = RotatingFileHandler(logfile, maxBytes=5 * 1024 * 1024, backupCount=3)
+    file_handler.setFormatter(formatter)
 
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setFormatter(formatter)
+
+    log.handlers.clear()
     log.setLevel(level)
-    log.addHandler(fh)
-    log.addHandler(sh)
+    log.addHandler(file_handler)
+    log.addHandler(stream_handler)
 
 
-# ---------------------------------------------------------------------------
-# TV helpers
-# ---------------------------------------------------------------------------
+def sanitize_device_id(value: str) -> str:
+    cleaned = "".join(ch.lower() if ch.isalnum() else "_" for ch in value.strip())
+    while "__" in cleaned:
+        cleaned = cleaned.replace("__", "_")
+    cleaned = cleaned.strip("_")
+    cleaned = cleaned or "default"
+    if cleaned == "all":
+        cleaned = "tv_all"
+    return cleaned
 
-def get_tv() -> SamsungTVWS:
-    """Return (creating if needed) the shared SamsungTVWS instance."""
-    global _tv, _art
-    if _tv is None:
-        tv_ip = _config.get("TV", "IP")
-        tv_port = _config.getint("TV", "PORT", fallback=8002)
-        tv_name = _config.get("TV", "NAME", fallback="LoxBerry")
-        config_dir = os.path.dirname(
-            _config.get("_meta", "config_path", fallback="/tmp/samsungframe.cfg")
+
+def topic_for_device(base_topic: str, device_id: str) -> str:
+    return f"{base_topic.rstrip('/')}/{device_id}"
+
+
+def token_file_for_device(config_dir: str, device_id: str) -> str:
+    if device_id == "default":
+        return os.path.join(config_dir, "token.txt")
+    return os.path.join(config_dir, f"token_{device_id}.txt")
+
+
+def load_runtime_config(config_path: str) -> RuntimeConfig:
+    parser = configparser.ConfigParser()
+    parser.read(config_path)
+    config_dir = os.path.dirname(config_path)
+
+    legacy_state_topic = parser.get("MQTT", "STATE_TOPIC", fallback=LEGACY_STATE_TOPIC).strip() or LEGACY_STATE_TOPIC
+    legacy_cmd_topic = parser.get("MQTT", "CMD_TOPIC", fallback=LEGACY_CMD_TOPIC).strip() or LEGACY_CMD_TOPIC
+    poll_interval = parser.getint("MONITOR", "POLL_INTERVAL", fallback=5)
+    loglevel = parser.getint("MONITOR", "LOGLEVEL", fallback=3)
+
+    devices: List[DeviceConfig] = []
+    seen_ids = set()
+
+    for section in parser.sections():
+        if not section.upper().startswith("DEVICE_"):
+            continue
+        raw_device_id = section[7:]
+        device_id = sanitize_device_id(raw_device_id)
+        if device_id in seen_ids:
+            log.warning(f"[system] Duplicate device id {device_id!r} in config, skipping section [{section}]")
+            continue
+        seen_ids.add(device_id)
+        devices.append(DeviceConfig(
+            device_id=device_id,
+            label=parser.get(section, "LABEL", fallback=device_id) or device_id,
+            ip=parser.get(section, "IP", fallback="").strip(),
+            mac=parser.get(section, "MAC", fallback="").strip(),
+            port=parser.getint(section, "PORT", fallback=8002),
+            name=parser.get(section, "NAME", fallback="LoxBerry") or "LoxBerry",
+            enabled=parser.getboolean(section, "ENABLED", fallback=True),
+        ))
+
+    if not devices:
+        devices.append(DeviceConfig(
+            device_id="default",
+            label=parser.get("TV", "LABEL", fallback="Primary TV") or "Primary TV",
+            ip=parser.get("TV", "IP", fallback="").strip(),
+            mac=parser.get("TV", "MAC", fallback="").strip(),
+            port=parser.getint("TV", "PORT", fallback=8002),
+            name=parser.get("TV", "NAME", fallback="LoxBerry") or "LoxBerry",
+            enabled=True,
+        ))
+
+    primary_device_id = sanitize_device_id(parser.get("GENERAL", "PRIMARY_DEVICE", fallback=devices[0].device_id))
+    available_ids = {device.device_id for device in devices}
+    enabled_ids = [device.device_id for device in devices if device.enabled]
+    if primary_device_id not in available_ids:
+        primary_device_id = enabled_ids[0] if enabled_ids else devices[0].device_id
+    elif primary_device_id not in enabled_ids and enabled_ids:
+        primary_device_id = enabled_ids[0]
+
+    return RuntimeConfig(
+        config_path=config_path,
+        config_dir=config_dir,
+        legacy_state_topic=legacy_state_topic,
+        legacy_cmd_topic=legacy_cmd_topic,
+        primary_device_id=primary_device_id,
+        poll_interval=max(1, poll_interval),
+        loglevel=loglevel,
+        devices=devices,
+    )
+
+
+def build_device_runtimes(runtime_config: RuntimeConfig) -> Dict[str, DeviceRuntime]:
+    devices = {}
+    for device_cfg in runtime_config.devices:
+        devices[device_cfg.device_id] = DeviceRuntime(
+            cfg=device_cfg,
+            token_file=token_file_for_device(runtime_config.config_dir, device_cfg.device_id),
+            state_topic=topic_for_device(runtime_config.legacy_state_topic, device_cfg.device_id),
+            cmd_topic=topic_for_device(runtime_config.legacy_cmd_topic, device_cfg.device_id),
+            is_primary=device_cfg.device_id == runtime_config.primary_device_id,
         )
-        token_file = os.path.join(config_dir, "token.txt")
-        _tv = SamsungTVWS(
-            host=tv_ip,
-            port=tv_port,
-            token_file=token_file,
-            timeout=5,
-            name=tv_name,
-        )
-        _art = None  # reset cached art instance when TV is recreated
-    return _tv
+    return devices
 
 
-def get_art():
-    """Return (creating if needed) the cached art() helper."""
-    global _art
-    tv = get_tv()
-    if _art is None:
-        _art = tv.art()
-    return _art
+def build_topic_targets() -> Dict[str, List[str]]:
+    topic_targets = {}
+    primary_device = _devices.get(_runtime_config.primary_device_id)
+    if primary_device:
+        topic_targets[_runtime_config.legacy_cmd_topic] = [primary_device.cfg.device_id]
+
+    for device in _devices.values():
+        if device.cfg.enabled:
+            topic_targets[device.cmd_topic] = [device.cfg.device_id]
+
+    if _broadcast_cmd_topic:
+        topic_targets[_broadcast_cmd_topic] = [device.cfg.device_id for device in _devices.values() if device.cfg.enabled]
+
+    return topic_targets
 
 
-def reset_tv() -> None:
-    """Discard TV/art instances so they are recreated on next use."""
-    global _tv, _art
-    _tv = None
-    _art = None
-
-
-def is_tv_on_rest() -> bool | None:
-    """
-    Check TV power state via REST (no auth, works in standby).
-    Returns True if PowerState == "on", False if "standby", None on error.
-    """
-    tv_ip = _config.get("TV", "IP")
+def get_mqtt_connection() -> Tuple[str, int, str, str]:
     try:
-        r = requests.get(f"http://{tv_ip}:8001/api/v2/", timeout=3)
-        power = r.json().get("device", {}).get("PowerState", "standby")
-        return power != "standby"
-    except Exception as e:
-        log.debug(f"REST check failed: {e}")
-        return None
-
-
-def get_tv_state() -> str:
-    """
-    Determine full TV state: "off" / "art" / "on".
-    Uses REST first (fast, no auth), then WebSocket for art mode.
-    """
-    powered_on = is_tv_on_rest()
-
-    if powered_on is None or not powered_on:
-        return "off"
-
-    # TV is on — check art mode via WebSocket
-    with _tv_lock:
-        try:
-            art = get_art()
-            artmode = art.get_artmode()
-            log.debug(f"Art mode query result: {artmode!r}")
-            return "art" if artmode == "on" else "on"
-        except Exception as e:
-            log.warning(f"Art mode check failed (WebSocket): {e} — assuming 'on'")
-            reset_tv()
-            return "on"
-
-
-# ---------------------------------------------------------------------------
-# State publishing
-# ---------------------------------------------------------------------------
-
-def publish_state(state: str, force: bool = False) -> None:
-    """Publish state to MQTT if it changed (or force=True)."""
-    global _current_state
-    if state == _current_state and not force:
-        return
-    topic = _config.get("MQTT", "STATE_TOPIC",
-                         fallback="loxberry/plugin/samsungframe/state")
-    try:
-        _mqtt_client.publish(topic, state, qos=1, retain=True)
-        log.info(f"State published: {state!r} → {topic}")
-        _current_state = state
-    except Exception as e:
-        log.error(f"MQTT publish failed: {e}")
-
-
-# ---------------------------------------------------------------------------
-# MQTT command handler
-# ---------------------------------------------------------------------------
-
-def on_mqtt_connect(client, userdata, flags, rc) -> None:
-    if rc == 0:
-        cmd_topic = _config.get("MQTT", "CMD_TOPIC",
-                                 fallback="loxberry/plugin/samsungframe/cmd")
-        client.subscribe(cmd_topic, qos=1)
-        log.info(f"MQTT connected, subscribed to {cmd_topic}")
-        # Re-publish current state with retain so Loxone sees it on reconnect
-        if _current_state:
-            publish_state(_current_state, force=True)
-    else:
-        log.error(f"MQTT connection failed, rc={rc}")
-
-
-def on_mqtt_disconnect(client, userdata, rc) -> None:
-    if rc != 0:
-        log.warning(f"MQTT disconnected unexpectedly (rc={rc}), will auto-reconnect")
-
-
-def on_mqtt_message(client, userdata, msg) -> None:
-    payload = msg.payload.decode("utf-8", errors="ignore").strip()
-    log.info(f"MQTT command received: {payload!r}")
-    handle_command(payload)
-
-
-def handle_command(cmd: str) -> None:
-    tv_ip = _config.get("TV", "IP")
-    tv_mac = _config.get("TV", "MAC", fallback="")
-
-    with _tv_lock:
-        try:
-            if cmd == "power_on":
-                # Try WebSocket first; fall back to WOL
-                try:
-                    tv = get_tv()
-                    tv.send_key("KEY_POWER")
-                    log.info("Sent KEY_POWER via WebSocket (power on)")
-                except Exception:
-                    reset_tv()
-                    if tv_mac:
-                        wakeonlan.send_magic_packet(tv_mac)
-                        log.info(f"Sent Wake-on-LAN to {tv_mac}")
-                    else:
-                        log.warning("power_on: WebSocket failed and no MAC configured for WOL")
-
-            elif cmd == "power_off":
-                tv = get_tv()
-                tv.hold_key("KEY_POWER", 3)
-                log.info("Sent KEY_POWER hold 3s (power off)")
-
-            elif cmd == "art_on":
-                art = get_art()
-                art.set_artmode("on")
-                log.info("Art mode enabled")
-                publish_state("art")
-
-            elif cmd == "art_off":
-                art = get_art()
-                art.set_artmode("off")
-                log.info("Art mode disabled")
-                publish_state("on")
-
-            elif cmd.startswith("key_"):
-                key = cmd[4:].upper()  # "key_KEY_MUTE" → "KEY_MUTE"
-                if not key.startswith("KEY_"):
-                    key = "KEY_" + key  # "key_mute" → "KEY_MUTE"
-                tv = get_tv()
-                tv.send_key(key)
-                log.info(f"Sent key: {key}")
-
-            else:
-                log.warning(f"Unknown command: {cmd!r}")
-
-        except Exception as e:
-            log.warning(f"Command '{cmd}' failed on first attempt: {type(e).__name__}: {e} — retrying once")
-            reset_tv()
-            time.sleep(1)
-            try:
-                if cmd == "power_on":
-                    if tv_mac:
-                        wakeonlan.send_magic_packet(tv_mac)
-                        log.info(f"Sent Wake-on-LAN to {tv_mac} (retry)")
-                    else:
-                        log.warning("power_on retry: no MAC configured for WOL")
-                elif cmd == "art_on":
-                    get_art().set_artmode("on")
-                    log.info("Art mode enabled (retry)")
-                    publish_state("art")
-                elif cmd == "art_off":
-                    get_art().set_artmode("off")
-                    log.info("Art mode disabled (retry)")
-                    publish_state("on")
-                elif cmd == "power_off":
-                    get_tv().hold_key("KEY_POWER", 3)
-                    log.info("Sent KEY_POWER hold 3s (power off, retry)")
-                elif cmd.startswith("key_"):
-                    key = cmd[4:].upper()
-                    if not key.startswith("KEY_"):
-                        key = "KEY_" + key
-                    get_tv().send_key(key)
-                    log.info(f"Sent key: {key} (retry)")
-                else:
-                    log.error(f"Command '{cmd}' failed: {type(e).__name__}: {e}")
-            except Exception as e2:
-                log.error(f"Command '{cmd}' failed after retry: {type(e2).__name__}: {e2}")
-                reset_tv()
-
-
-# ---------------------------------------------------------------------------
-# Main loop
-# ---------------------------------------------------------------------------
-
-def get_mqtt_connection() -> tuple[str, int, str, str]:
-    """Read MQTT host, port and credentials from LoxBerry's general.json (Mqtt section)."""
-    try:
-        with open("/opt/loxberry/config/system/general.json") as f:
-            data = json.load(f)
+        with open("/opt/loxberry/config/system/general.json") as handle:
+            data = json.load(handle)
         mqtt_cfg = data.get("Mqtt", {})
         host = mqtt_cfg.get("Brokerhost", "localhost") or "localhost"
         port = int(mqtt_cfg.get("Brokerport", 1883) or 1883)
         user = mqtt_cfg.get("Brokeruser", "")
         password = mqtt_cfg.get("Brokerpass", "")
         return host, port, user, password
-    except Exception as e:
-        log.debug(f"Could not read general.json: {e} — using defaults")
+    except Exception as exc:
+        log.debug(f"[system] Could not read general.json: {exc} — using defaults")
         return "localhost", 1883, "", ""
 
 
-def setup_mqtt() -> mqtt.Client:
+def on_mqtt_connect(client, userdata, flags, rc) -> None:
+    if rc != 0:
+        log.error(f"[system] MQTT connection failed, rc={rc}")
+        return
+
+    for topic in sorted(_topic_targets.keys()):
+        client.subscribe(topic, qos=1)
+        log.info(f"[system] MQTT subscribed to {topic}")
+
+    for device in _devices.values():
+        if device.current_state:
+            device.publish_state(device.current_state, force=True)
+
+
+def on_mqtt_disconnect(client, userdata, rc) -> None:
+    if rc != 0:
+        log.warning(f"[system] MQTT disconnected unexpectedly (rc={rc}), will auto-reconnect")
+
+
+def on_mqtt_message(client, userdata, msg) -> None:
+    payload = msg.payload.decode("utf-8", errors="ignore").strip()
+    targets = _topic_targets.get(msg.topic, [])
+
+    if not targets:
+        log.warning(f"[system] MQTT message received for unhandled topic {msg.topic}: {payload!r}")
+        return
+
+    if msg.topic == _broadcast_cmd_topic:
+        log.info(f"[system] Broadcast MQTT command received on {msg.topic}: {payload!r}")
+
+    for device_id in targets:
+        device = _devices.get(device_id)
+        if not device:
+            continue
+        log.info(device.prefix(f"MQTT command received on {msg.topic}: {payload!r}"))
+        device.handle_command(payload)
+
+
+def setup_mqtt():
     client = mqtt.Client(client_id="samsungframe-monitor", clean_session=True)
     client.on_connect = on_mqtt_connect
     client.on_disconnect = on_mqtt_disconnect
@@ -327,88 +422,81 @@ def setup_mqtt() -> mqtt.Client:
     host, port, user, password = get_mqtt_connection()
     if user:
         client.username_pw_set(user, password)
-        log.info(f"MQTT using credentials for user '{user}'")
+        log.info(f"[system] MQTT using credentials for user '{user}'")
 
-    # Set last-will so Loxone sees "off" if the daemon crashes
-    state_topic = _config.get("MQTT", "STATE_TOPIC",
-                               fallback="loxberry/plugin/samsungframe/state")
-    client.will_set(state_topic, "off", qos=1, retain=True)
-
+    client.will_set(_runtime_config.legacy_state_topic, "off", qos=1, retain=True)
     client.connect_async(host, port, keepalive=60)
     client.loop_start()
-    log.info(f"MQTT connecting to {host}:{port}")
+    log.info(f"[system] MQTT connecting to {host}:{port}")
     return client
 
 
 def run_poll_loop() -> None:
-    """
-    Main polling loop. Checks TV state every POLL_INTERVAL seconds and
-    publishes to MQTT on change.
-    """
-    poll_interval = _config.getint("MONITOR", "POLL_INTERVAL", fallback=5)
-    log.info(f"Starting poll loop (interval={poll_interval}s)")
+    log.info(f"[system] Starting poll loop (interval={_runtime_config.poll_interval}s)")
 
     while not _shutdown.is_set():
-        # Reload config on every cycle so web UI changes are picked up without restart
-        config_path = _config.get("_meta", "config_path")
-        _config.read(config_path)
-        poll_interval = _config.getint("MONITOR", "POLL_INTERVAL", fallback=5)
+        for device in _devices.values():
+            if not device.cfg.enabled:
+                continue
+            state = device.get_state()
+            device.publish_state(state)
 
-        state = get_tv_state()
-        publish_state(state)
+        _shutdown.wait(timeout=_runtime_config.poll_interval)
 
-        _shutdown.wait(timeout=poll_interval)
-
-    log.info("Poll loop exiting.")
+    log.info("[system] Poll loop exiting")
 
 
 def handle_signal(signum, frame) -> None:
-    log.info(f"Signal {signum} received, shutting down...")
+    log.info(f"[system] Signal {signum} received, shutting down")
     _shutdown.set()
 
 
 def main() -> None:
-    global _config, _mqtt_client
+    global _mqtt_client, _runtime_config, _devices, _topic_targets, _broadcast_cmd_topic
 
     parser = argparse.ArgumentParser(description="Samsung Frame TV monitor daemon")
     parser.add_argument("--config", required=True, help="Path to samsungframe.cfg")
     parser.add_argument("--logfile", required=True, help="Path to log file")
     args = parser.parse_args()
 
-    _config = configparser.ConfigParser()
-    _config.read(args.config)
-    # Stash the config path so get_tv() can locate the token file
-    if not _config.has_section("_meta"):
-        _config.add_section("_meta")
-    _config.set("_meta", "config_path", args.config)
+    _runtime_config = load_runtime_config(args.config)
+    setup_logging(args.logfile, _runtime_config.loglevel)
 
-    loglevel = _config.getint("MONITOR", "LOGLEVEL", fallback=3)
-    setup_logging(args.logfile, loglevel)
+    _devices = build_device_runtimes(_runtime_config)
+    _broadcast_cmd_topic = topic_for_device(_runtime_config.legacy_cmd_topic, "all")
+    _topic_targets = build_topic_targets()
 
-    log.info("Samsung Frame TV monitor starting")
-    log.info(f"Config: {args.config}")
-    log.info(f"TV: {_config.get('TV', 'IP')}:{_config.get('TV', 'PORT', fallback='8002')}")
+    log.info("[system] Samsung Frame TV monitor starting")
+    log.info(f"[system] Config: {_runtime_config.config_path}")
+    log.info(f"[system] Primary device: {_runtime_config.primary_device_id}")
+    log.info(f"[system] Configured devices: {', '.join(_devices.keys())}")
+
+    for device in _devices.values():
+        primary_note = " (primary)" if device.is_primary else ""
+        enabled_note = "enabled" if device.cfg.enabled else "disabled"
+        log.info(device.prefix(
+            f"Configured {enabled_note}: {device.cfg.ip or 'no-ip'}:{device.cfg.port}, state topic {device.state_topic}, command topic {device.cmd_topic}{primary_note}"
+        ))
 
     signal.signal(signal.SIGTERM, handle_signal)
     signal.signal(signal.SIGINT, handle_signal)
 
     _mqtt_client = setup_mqtt()
 
-    # Wait for MQTT to connect before first state publish (up to 10s)
     for _ in range(20):
         if _mqtt_client.is_connected():
             break
         time.sleep(0.5)
     else:
-        log.warning("MQTT did not connect within 10s — continuing anyway")
+        log.warning("[system] MQTT did not connect within 10s — continuing anyway")
 
     try:
         run_poll_loop()
     finally:
-        log.info("Disconnecting MQTT...")
+        log.info("[system] Disconnecting MQTT")
         _mqtt_client.loop_stop()
         _mqtt_client.disconnect()
-        log.info("Samsung Frame TV monitor stopped.")
+        log.info("[system] Samsung Frame TV monitor stopped")
 
 
 if __name__ == "__main__":

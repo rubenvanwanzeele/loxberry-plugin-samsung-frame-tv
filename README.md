@@ -10,10 +10,13 @@ No cloud. No SmartThings. Direct local control only.
 ## Features
 
 - Detects TV state — **off / art mode / on** — and publishes to MQTT every 5 seconds
+- Supports **multiple Samsung TVs** in one plugin instance
+- Keeps one **primary TV** on the original v1.0 MQTT topics for backward compatibility
+- Publishes and subscribes to **per-device MQTT topics** for extra TVs
 - Sends commands from Loxone to the TV: power, art mode, any remote key
 - Wake-on-LAN support for powering on from standby
 - Web UI for configuration, pairing, live status and test controls
-- Configuration and pairing token are preserved across plugin upgrades
+- Configuration and pairing tokens are preserved across plugin upgrades
 
 ---
 
@@ -46,14 +49,19 @@ Python dependencies (`samsungtvws`, `paho-mqtt`, `wakeonlan`) are installed auto
 
 ### 1. Configure
 
-Open the plugin page in LoxBerry. Enter the **TV IP address** and click **Save Configuration**.
-The MAC address for Wake-on-LAN is auto-discovered via ARP on save.
+Open the plugin page in LoxBerry.
+
+- In **General Configuration**, keep or adjust the legacy MQTT topics, poll interval and log level.
+- In **TV Configuration**, configure one or more TVs.
+- Mark one TV as the **primary TV** if you want to keep the original v1.0 MQTT topics for that device.
+
+The MAC address for Wake-on-LAN is auto-discovered via ARP on save when possible.
 
 ### 2. Pair
 
-With the TV **powered on and showing a picture** (not in standby or art mode), click **Start Pairing**.
+With a TV **powered on and showing a picture** (not in standby or art mode), click **Start Pairing** for that TV.
 Accept the popup that appears on the TV within 30 seconds.
-The token is saved and reused automatically — you only need to pair once.
+Each TV stores its own token and reuses it automatically — you only need to pair each TV once.
 
 > If you see "Not paired" after an upgrade, run pairing again. This is only needed if the token file was lost.
 
@@ -72,7 +80,8 @@ On the TV: **Settings → General → Network → Expert Settings → Power On w
 
 | Topic | Values | Notes |
 |---|---|---|
-| `loxberry/plugin/samsungframe/state` | `off` / `art` / `on` | retained, updated every 5s |
+| `loxberry/plugin/samsungframe/state` | `off` / `art` / `on` | retained, primary TV only for backward compatibility |
+| `loxberry/plugin/samsungframe/state/<device_id>` | `off` / `art` / `on` | retained, available for every configured TV |
 
 | Value | Meaning |
 |---|---|
@@ -82,7 +91,13 @@ On the TV: **Settings → General → Network → Expert Settings → Power On w
 
 ### Commands (Loxone → plugin)
 
-Publish to topic: `loxberry/plugin/samsungframe/cmd`
+| Topic | Meaning |
+|---|---|
+| `loxberry/plugin/samsungframe/cmd` | Send to the primary TV (legacy compatibility) |
+| `loxberry/plugin/samsungframe/cmd/<device_id>` | Send to one specific TV |
+| `loxberry/plugin/samsungframe/cmd/all` | Send the same command to all enabled TVs |
+
+Publish any of the following payloads to one of those topics:
 
 | Payload | Action |
 |---|---|
@@ -97,7 +112,7 @@ Publish to topic: `loxberry/plugin/samsungframe/cmd`
 | `key_KEY_RETURN` | Back |
 | `key_XXXX` | Any Samsung remote key, e.g. `key_KEY_HDMI1`, `key_KEY_NETFLIX` |
 
-Topics are configurable in the plugin web UI.
+The base legacy topics are configurable in the plugin web UI. Device topics are derived automatically by appending `/<device_id>`.
 
 ---
 
@@ -106,8 +121,11 @@ Topics are configurable in the plugin web UI.
 ### Receive TV state
 
 1. In Loxone Config add a **Virtual Input** → type **Text** → **MQTT**
-2. Topic: `loxberry/plugin/samsungframe/state`, enable **Retain**
-3. Add a **Formula** block to convert to a number:
+2. Topic:
+   - use `loxberry/plugin/samsungframe/state` for the primary TV, or
+   - use `loxberry/plugin/samsungframe/state/<device_id>` for another TV
+3. Enable **Retain**
+4. Add a **Formula** block to convert to a number:
    - `IF(AQ == "on", 1, 0)` — 1 when TV is actively playing
    - `IF(AQ == "art", 1, 0)` — 1 when in art mode
    - `IF(AQ == "off", 1, 0)` — 1 when TV is off
@@ -115,7 +133,10 @@ Topics are configurable in the plugin web UI.
 ### Send commands
 
 1. Add a **Virtual Output** → type **MQTT**
-2. Topic: `loxberry/plugin/samsungframe/cmd`
+2. Topic:
+   - `loxberry/plugin/samsungframe/cmd` for the primary TV
+   - `loxberry/plugin/samsungframe/cmd/<device_id>` for a specific TV
+   - `loxberry/plugin/samsungframe/cmd/all` to target all TVs
 3. Payload on: the command to send, e.g. `power_off`
 
 ### Example automations
@@ -128,7 +149,7 @@ Topics are configurable in the plugin web UI.
 
 ## Upgrades
 
-Plugin upgrades preserve your configuration (IP, topics, poll interval) and pairing token automatically. You do not need to re-enter settings or re-pair after an upgrade.
+Plugin upgrades preserve your configuration, TV list, topics, poll interval and pairing tokens automatically. You do not need to re-enter settings or re-pair after an upgrade.
 
 ---
 
@@ -143,7 +164,7 @@ tail -f /opt/loxberry/log/plugins/samsungframe/monitor.log
 
 **Pairing fails / no popup on TV**
 Developer mode must be enabled: `Settings → Support → Device Care → Developer Mode`.
-The TV must be powered on and showing a picture (not in standby).
+The TV must be powered on and showing a picture (not in standby). Pair each TV separately.
 
 **Art mode not detected**
 The art mode API was removed in some 2022–2023 firmware versions and re-added in early 2024.
@@ -154,6 +175,9 @@ Enable Wake-on-LAN in TV settings and confirm the MAC address is shown in the pl
 
 **Commands fail with "socket closed" in logs**
 This is handled automatically — the daemon resets the connection and retries. If it persists, check that no other app is holding a WebSocket connection to the TV.
+
+**Only the primary TV responds on the old topic**
+This is expected. Extra TVs listen on `.../cmd/<device_id>` and publish to `.../state/<device_id>`.
 
 ---
 

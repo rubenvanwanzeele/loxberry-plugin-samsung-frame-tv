@@ -10,9 +10,14 @@ if [ -f /tmp/samsungframe_cfg.bak ]; then
     mv /tmp/samsungframe_cfg.bak "$CFGDIR/samsungframe.cfg"
     echo "<INFO> Config restored."
 fi
-if [ -f /tmp/samsungframe_token.txt.bak ]; then
-    mv /tmp/samsungframe_token.txt.bak "$CFGDIR/token.txt"
-    echo "<INFO> Pairing token restored."
+if [ -d /tmp/samsungframe_tokens.bak ]; then
+    for token in /tmp/samsungframe_tokens.bak/token*.txt; do
+        if [ -f "$token" ]; then
+            mv "$token" "$CFGDIR/$(basename "$token")"
+        fi
+    done
+    rmdir /tmp/samsungframe_tokens.bak 2>/dev/null || true
+    echo "<INFO> Pairing tokens restored."
 fi
 
 echo "<INFO> Restarting Samsung Frame TV service..."

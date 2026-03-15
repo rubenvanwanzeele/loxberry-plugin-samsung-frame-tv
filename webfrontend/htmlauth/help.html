@@ -3,6 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <title>Samsung Frame TV – Help</title>
+    <style>
+        table.sf-table {
+            border-collapse: collapse;
+        }
+        table.sf-table th,
+        table.sf-table td {
+            border: 1px solid #ccc;
+            padding: 6px;
+            text-align: left;
+        }
+    </style>
 </head>
 <body>
 
@@ -14,30 +25,42 @@
     Loxone via MQTT. No cloud or SmartThings account is required — all communication
     is direct over your local network.
 </p>
+<p>
+    Version 1.1 adds support for multiple TVs. One TV can be marked as the
+    <strong>primary</strong> TV to keep the original v1.0 legacy MQTT topics, while each
+    configured TV also gets its own device-specific topics.
+</p>
 
 <h3>Initial Setup</h3>
 <ol>
-    <li>Enter the <strong>TV IP address</strong> in the Configuration section and click
-        <em>Save Configuration</em>. The TV's MAC address will be discovered automatically.</li>
+    <li>In <strong>General Configuration</strong>, keep or adjust the legacy MQTT topics and
+        polling settings.</li>
+    <li>In <strong>TV Configuration</strong>, configure one or more TVs. For each TV, enter the
+        IP address and optionally the MAC address. The MAC address is discovered automatically on save when possible.</li>
+    <li>Select which TV should be the <strong>primary</strong> TV. That TV keeps the original
+        legacy MQTT topics for backward compatibility.</li>
     <li>Make sure the TV is powered on and displaying a picture.</li>
-    <li>Click <strong>Start Pairing</strong>. A popup will appear on the TV — accept it
-        within 30 seconds. The pairing token is saved and reused automatically.</li>
+    <li>Click <strong>Start Pairing</strong> on the TV you want to pair. A popup will appear on
+        that TV — accept it within 30 seconds. Each TV stores its own pairing token and reuses it automatically.</li>
     <li>The monitor daemon starts automatically when LoxBerry boots. After pairing, it
         will begin publishing TV state to MQTT.</li>
 </ol>
 
 <h3>TV States</h3>
-<table border="1" cellpadding="6" cellspacing="0">
+<table class="sf-table">
     <tr><th>State</th><th>Meaning</th></tr>
     <tr><td><code>off</code></td><td>TV is in standby</td></tr>
     <tr><td><code>art</code></td><td>TV is on and Art Mode is active</td></tr>
     <tr><td><code>on</code></td><td>TV is on and showing normal content</td></tr>
 </table>
-<p>State is published (retained) to the configured MQTT state topic.</p>
+<p>
+    The primary TV publishes to the configured legacy state topic and to its own device topic.
+    Additional TVs publish to <code>&lt;state topic&gt;/&lt;device_id&gt;</code>.
+</p>
 
 <h3>MQTT Commands</h3>
-<p>Publish any of the following payloads to the command topic:</p>
-<table border="1" cellpadding="6" cellspacing="0">
+<p>Publish any of the following payloads to the primary command topic or a device-specific command topic:</p>
+<table class="sf-table">
     <tr><th>Payload</th><th>Action</th></tr>
     <tr><td><code>power_on</code></td><td>Wake TV from standby (WebSocket or Wake-on-LAN)</td></tr>
     <tr><td><code>power_off</code></td><td>Hold power button 3 s — powers off the TV</td></tr>
@@ -48,12 +71,19 @@
     <tr><td><code>key_KEY_VOLDOWN</code></td><td>Send the VOLUME DOWN key</td></tr>
     <tr><td><code>key_XXXX</code></td><td>Send any raw Samsung remote key</td></tr>
 </table>
+<p>
+    Topic layout:<br>
+    <code>&lt;cmd topic&gt;</code> → primary TV (legacy compatibility)<br>
+    <code>&lt;cmd topic&gt;/&lt;device_id&gt;</code> → one specific TV<br>
+    <code>&lt;cmd topic&gt;/all</code> → all enabled TVs
+</p>
 
 <h3>Loxone Integration</h3>
 <p>
     In Loxone Config, use a <strong>Virtual Input</strong> (text input) listening on the
-    state topic to react to TV state changes. Use a <strong>Virtual Output</strong>
-    publishing to the command topic to send commands from Loxone.
+    state topic to react to TV state changes. For extra TVs, use the device-specific
+    state topic. Use a <strong>Virtual Output</strong> publishing to the command topic you want
+    to target.
 </p>
 
 <h3>Troubleshooting</h3>
@@ -64,6 +94,8 @@
         firmware. Update the TV firmware and retry.</li>
     <li><strong>State stuck at "unknown":</strong> The daemon may not be running. Check
         the log at <code>/opt/loxberry/log/plugins/samsungframe/monitor.log</code>.</li>
+    <li><strong>One TV works but another does not:</strong> Confirm the extra TV has its own
+        IP address, topic suffix, and pairing token. Pair each TV separately.</li>
     <li><strong>Wake-on-LAN not working:</strong> Ensure the MAC address is correct and
         that the TV is on wired Ethernet.</li>
 </ul>
