@@ -91,6 +91,9 @@ class DeviceRuntime:
     availability_topic: str
     is_primary: bool = False
     current_state: str = ""
+    last_command_requested_at: float = 0.0
+    pending_power_command: Optional[str] = None
+    pending_power_deadline: float = 0.0
     tv: Optional[SamsungTVWS] = None
     art = None
     lock: threading.Lock = field(default_factory=threading.Lock)
@@ -120,6 +123,20 @@ class DeviceRuntime:
         self.tv = None
         self.art = None
 
+    def mark_command_requested(self) -> None:
+        self.last_command_requested_at = time.time()
+
+    def set_pending_power(self, cmd: str, seconds: float = 20.0) -> None:
+        self.pending_power_command = cmd
+        self.pending_power_deadline = time.time() + seconds
+
+    def clear_pending_power(self) -> None:
+        self.pending_power_command = None
+        self.pending_power_deadline = 0.0
+
+    def is_power_pending(self, cmd: str) -> bool:
+        return self.pending_power_command == cmd and time.time() < self.pending_power_deadline
+
     def is_tv_on_rest(self) -> Optional[bool]:
         if not self.cfg.ip:
             log.debug(self.prefix("REST check skipped: no IP configured"))
@@ -134,13 +151,38 @@ class DeviceRuntime:
 
     def get_state(self) -> str:
         powered_on = self.is_tv_on_rest()
-        if powered_on is None or not powered_on:
+
+        if powered_on is False:
+            self.clear_pending_power()
+            self.reset_tv()
             return "off"
+
+        if powered_on is None:
+            if self.current_state:
+                log.debug(self.prefix("REST state unavailable — keeping previous state"))
+                return self.current_state
+            return "off"
+
+        if self.is_power_pending("power_off"):
+            previous = self.current_state or "on"
+            log.debug(self.prefix(f"Power-off pending while TV still reports on — keeping previous state {previous!r}"))
+            return previous
+
+        if self.is_power_pending("power_on"):
+            self.clear_pending_power()
+            log.debug(self.prefix("Power-on confirmed by REST — reporting 'on' during warm-up"))
+            return "on"
+
+        if time.time() - self.last_command_requested_at < 2.0:
+            previous = self.current_state or "on"
+            log.debug(self.prefix(f"Recent command in progress — keeping previous state {previous!r}"))
+            return previous
 
         with self.lock:
             try:
                 artmode = self.get_art().get_artmode()
                 log.debug(self.prefix(f"Art mode query result: {artmode!r}"))
+                self.clear_pending_power()
                 return "art" if artmode == "on" else "on"
             except Exception as exc:
                 log.warning(self.prefix(f"Art mode check failed ({type(exc).__name__}: {exc}) — assuming 'on'"))
@@ -166,50 +208,70 @@ class DeviceRuntime:
         self.current_state = state
 
     def handle_command(self, cmd: str) -> None:
-        with self.lock:
+        self.mark_command_requested()
+        power_state = self.is_tv_on_rest() if cmd in ("power_on", "power_off") else None
+
+        try:
+            with self.lock:
+                self._handle_command_once(cmd, power_state=power_state)
+        except Exception as exc:
+            log.warning(self.prefix(
+                f"Command {cmd!r} failed on first attempt: {type(exc).__name__}: {exc} — retrying once"
+            ))
+            self.reset_tv()
+            time.sleep(1)
+            retry_power_state = self.is_tv_on_rest() if cmd in ("power_on", "power_off") else None
             try:
-                self._handle_command_once(cmd)
-            except Exception as exc:
-                log.warning(self.prefix(
-                    f"Command {cmd!r} failed on first attempt: {type(exc).__name__}: {exc} — retrying once"
+                with self.lock:
+                    self._handle_command_once(cmd, retry=True, power_state=retry_power_state)
+            except Exception as retry_exc:
+                log.error(self.prefix(
+                    f"Command {cmd!r} failed after retry: {type(retry_exc).__name__}: {retry_exc}"
                 ))
                 self.reset_tv()
-                time.sleep(1)
-                try:
-                    self._handle_command_once(cmd, retry=True)
-                except Exception as retry_exc:
-                    log.error(self.prefix(
-                        f"Command {cmd!r} failed after retry: {type(retry_exc).__name__}: {retry_exc}"
-                    ))
-                    self.reset_tv()
 
-    def _handle_command_once(self, cmd: str, retry: bool = False) -> None:
+    def _handle_command_once(self, cmd: str, retry: bool = False, power_state: Optional[bool] = None) -> None:
         suffix = " (retry)" if retry else ""
 
         if cmd == "power_on":
-            try:
+            if power_state is True:
+                log.info(self.prefix(f"power_on ignored: TV already reports on{suffix}"))
+                self.clear_pending_power()
+                return
+
+            if self.cfg.mac:
+                wakeonlan.send_magic_packet(self.cfg.mac)
+                log.info(self.prefix(f"Sent Wake-on-LAN to {self.cfg.mac}{suffix}"))
+            else:
                 self.get_tv().send_key("KEY_POWER")
                 log.info(self.prefix(f"Sent KEY_POWER via WebSocket (power on){suffix}"))
-            except Exception:
-                self.reset_tv()
-                if self.cfg.mac:
-                    wakeonlan.send_magic_packet(self.cfg.mac)
-                    log.info(self.prefix(f"Sent Wake-on-LAN to {self.cfg.mac}{suffix}"))
-                else:
-                    log.warning(self.prefix(f"power_on: WebSocket failed and no MAC configured for WOL{suffix}"))
+
+            self.set_pending_power("power_on")
+            self.reset_tv()
 
         elif cmd == "power_off":
+            if power_state is False:
+                log.info(self.prefix(f"power_off ignored: TV already reports off{suffix}"))
+                self.clear_pending_power()
+                self.reset_tv()
+                self.publish_state("off", force=True)
+                return
+
             self.get_tv().hold_key("KEY_POWER", 3)
             log.info(self.prefix(f"Sent KEY_POWER hold 3s (power off){suffix}"))
+            self.set_pending_power("power_off")
+            self.reset_tv()
 
         elif cmd == "art_on":
             self.get_art().set_artmode("on")
             log.info(self.prefix(f"Art mode enabled{suffix}"))
+            self.clear_pending_power()
             self.publish_state("art", force=True)
 
         elif cmd == "art_off":
             self.get_art().set_artmode("off")
             log.info(self.prefix(f"Art mode disabled{suffix}"))
+            self.clear_pending_power()
             self.publish_state("on", force=True)
 
         elif cmd.startswith("key_"):
@@ -218,6 +280,7 @@ class DeviceRuntime:
                 key = "KEY_" + key
             self.get_tv().send_key(key)
             log.info(self.prefix(f"Sent key: {key}{suffix}"))
+            self.clear_pending_power()
 
         else:
             log.warning(self.prefix(f"Unknown command: {cmd!r}"))
