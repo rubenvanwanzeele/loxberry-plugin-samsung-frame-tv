@@ -480,7 +480,8 @@ LBWeb::lbheader('Samsung Frame TV', $pluginname, 'help.html');
 .sf-btn-danger { background:#c0392b; color:#fff; }
 .sf-btn-purple { background:#8e44ad; color:#fff; }
 .sf-btn-grey { background:#7f8c8d; color:#fff; }
-.sf-btn-help { background:#34495e; color:#fff; text-decoration:none; display:inline-block; }
+.sf-link-btn { text-decoration:none; display:inline-block; }
+.sf-actions { margin-top:14px; display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
 .sf-btn:hover { opacity:.87; }
 .sf-state-badge, .sf-small-badge { display:inline-block; color:#fff; font-weight:600; letter-spacing:.2px; }
 .sf-state-badge { padding:6px 18px; border-radius:20px; font-size:1em; }
@@ -556,13 +557,15 @@ LBWeb::lbheader('Samsung Frame TV', $pluginname, 'help.html');
             <?php endforeach; ?>
         </tbody>
     </table>
-    <form method="post" style="margin-top:14px; display:inline">
-        <input type="hidden" name="action" value="restart_daemon">
-        <button type="submit" class="sf-btn sf-btn-warning">Restart Daemon</button>
-    </form>
-    <a class="sf-btn sf-btn-help" style="margin-top:14px;" href="help.html" title="Open plugin help and MQTT reference">
-        Open Help
-    </a>
+    <div class="sf-actions">
+        <form method="post" style="display:inline">
+            <input type="hidden" name="action" value="restart_daemon">
+            <button type="submit" class="sf-btn sf-btn-warning">Restart Daemon</button>
+        </form>
+        <a class="sf-btn sf-btn-grey sf-link-btn" href="help.html" title="Open plugin help and MQTT reference">
+            Open Help
+        </a>
+    </div>
 </div>
 
 <form method="post" id="sf-config-form">
