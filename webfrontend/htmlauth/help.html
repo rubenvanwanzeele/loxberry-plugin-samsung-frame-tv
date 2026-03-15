@@ -27,18 +27,18 @@
 </p>
 <p>
     Version 1.1 adds support for multiple TVs. One TV can be marked as the
-    <strong>primary</strong> TV to keep the original v1.0 legacy MQTT topics, while each
-    configured TV also gets its own device-specific topics.
+    <strong>primary</strong> TV for the base MQTT topics, while each configured TV also gets
+    its own device-specific topics.
 </p>
 
 <h3>Initial Setup</h3>
 <ol>
-    <li>In <strong>General Configuration</strong>, keep or adjust the legacy MQTT topics and
+    <li>In <strong>General Configuration</strong>, keep or adjust the base MQTT topics and
         polling settings.</li>
     <li>In <strong>TV Configuration</strong>, configure one or more TVs. For each TV, enter the
         IP address and optionally the MAC address. The MAC address is discovered automatically on save when possible.</li>
     <li>Select which TV should be the <strong>primary</strong> TV. That TV keeps the original
-        legacy MQTT topics for backward compatibility.</li>
+        base MQTT topics.</li>
     <li>Make sure the TV is powered on and displaying a picture.</li>
     <li>Click <strong>Start Pairing</strong> on the TV you want to pair. A popup will appear on
         that TV — accept it within 30 seconds. Each TV stores its own pairing token and reuses it automatically.</li>
@@ -54,8 +54,10 @@
     <tr><td><code>on</code></td><td>TV is on and showing normal content</td></tr>
 </table>
 <p>
-    The primary TV publishes to the configured legacy state topic and to its own device topic.
-    Additional TVs publish to <code>&lt;state topic&gt;/&lt;device_id&gt;</code>.
+    The primary TV publishes to the configured base state topic and to its own device topic.
+    Additional TVs publish to <code>&lt;state topic&gt;/&lt;device_id&gt;</code>. Device availability is
+    published to <code>&lt;state topic&gt;/availability/&lt;device_id&gt;</code> with values
+    <code>online</code> / <code>offline</code>.
 </p>
 
 <h3>MQTT Commands</h3>
@@ -73,7 +75,7 @@
 </table>
 <p>
     Topic layout:<br>
-    <code>&lt;cmd topic&gt;</code> → primary TV (legacy compatibility)<br>
+    <code>&lt;cmd topic&gt;</code> → primary TV<br>
     <code>&lt;cmd topic&gt;/&lt;device_id&gt;</code> → one specific TV<br>
     <code>&lt;cmd topic&gt;/all</code> → all enabled TVs
 </p>

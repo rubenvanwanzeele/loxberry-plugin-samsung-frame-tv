@@ -11,7 +11,7 @@ No cloud. No SmartThings. Direct local control only.
 
 - Detects TV state — **off / art mode / on** — and publishes to MQTT every 5 seconds
 - Supports **multiple Samsung TVs** in one plugin instance
-- Keeps one **primary TV** on the original v1.0 MQTT topics for backward compatibility
+- Uses one **primary TV** on the base MQTT topics
 - Publishes and subscribes to **per-device MQTT topics** for extra TVs
 - Sends commands from Loxone to the TV: power, art mode, any remote key
 - Wake-on-LAN support for powering on from standby
@@ -51,7 +51,7 @@ Python dependencies (`samsungtvws`, `paho-mqtt`, `wakeonlan`) are installed auto
 
 Open the plugin page in LoxBerry.
 
-- In **General Configuration**, keep or adjust the legacy MQTT topics, poll interval and log level.
+- In **General Configuration**, keep or adjust the base MQTT topics, poll interval and log level.
 - In **TV Configuration**, configure one or more TVs.
 - Mark one TV as the **primary TV** if you want to keep the original v1.0 MQTT topics for that device.
 
@@ -80,8 +80,9 @@ On the TV: **Settings → General → Network → Expert Settings → Power On w
 
 | Topic | Values | Notes |
 |---|---|---|
-| `loxberry/plugin/samsungframe/state` | `off` / `art` / `on` | retained, primary TV only for backward compatibility |
+| `loxberry/plugin/samsungframe/state` | `off` / `art` / `on` | retained, primary TV |
 | `loxberry/plugin/samsungframe/state/<device_id>` | `off` / `art` / `on` | retained, available for every configured TV |
+| `loxberry/plugin/samsungframe/state/availability/<device_id>` | `online` / `offline` | retained, device availability |
 
 | Value | Meaning |
 |---|---|
@@ -93,7 +94,7 @@ On the TV: **Settings → General → Network → Expert Settings → Power On w
 
 | Topic | Meaning |
 |---|---|
-| `loxberry/plugin/samsungframe/cmd` | Send to the primary TV (legacy compatibility) |
+| `loxberry/plugin/samsungframe/cmd` | Send to the primary TV |
 | `loxberry/plugin/samsungframe/cmd/<device_id>` | Send to one specific TV |
 | `loxberry/plugin/samsungframe/cmd/all` | Send the same command to all enabled TVs |
 
@@ -112,7 +113,7 @@ Publish any of the following payloads to one of those topics:
 | `key_KEY_RETURN` | Back |
 | `key_XXXX` | Any Samsung remote key, e.g. `key_KEY_HDMI1`, `key_KEY_NETFLIX` |
 
-The base legacy topics are configurable in the plugin web UI. Device topics are derived automatically by appending `/<device_id>`.
+The base topics are configurable in the plugin web UI. Device topics are derived automatically by appending `/<device_id>`.
 
 ---
 

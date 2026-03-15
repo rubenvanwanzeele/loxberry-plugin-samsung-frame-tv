@@ -1,8 +1,4 @@
 <?php
-// Temporary diagnostics for blank-page troubleshooting on LoxBerry.
-// Remove these lines again after the root cause is fixed.
-error_reporting(E_ALL);
-ini_set('display_errors', '1');
 
 /**
  * Samsung Frame TV — LoxBerry Plugin Web UI
@@ -451,6 +447,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $state_color = ['off' => '#e74c3c', 'art' => '#9b59b6', 'on' => '#2ecc71', 'unknown' => '#95a5a6'];
 $state_label = ['off' => 'Off', 'art' => 'Art Mode', 'on' => 'On (Active)', 'unknown' => 'Unknown'];
 
+$enabled_devices = array_values(array_filter($devices, function ($device) {
+    return !empty($device['enabled']);
+}));
+
 $device_statuses = [];
 foreach ($devices as $device) {
     $device_statuses[$device['device_id']] = [
@@ -509,7 +509,7 @@ LBWeb::lbheader('Samsung Frame TV', $pluginname, 'help.html');
 <div class="sf-card">
     <h3>Live Status Overview</h3>
     <p class="sf-muted">
-        The primary TV keeps the legacy topics for backward compatibility. Every TV also has its own device topic suffix.
+        The configured primary TV uses the base state and command topics. Every TV also has a derived per-device topic using <code>/&lt;device_id&gt;</code>.
     </p>
     <table class="sf-summary-table">
         <thead>
@@ -546,10 +546,11 @@ LBWeb::lbheader('Samsung Frame TV', $pluginname, 'help.html');
                     <?php endif; ?>
                 </td>
                 <td>
-                    <div><strong>State:</strong> <code><?= h($device['ui_state_topic']) ?></code></div>
-                    <div><strong>Command:</strong> <code><?= h($device['ui_cmd_topic']) ?></code></div>
+                    <div><strong>State output:</strong> <code><?= h($device['ui_state_topic']) ?></code></div>
+                    <div><strong>Command input:</strong> <code><?= h($device['ui_cmd_topic']) ?></code></div>
+                    <div><strong>Availability output:</strong> <code><?= h(rtrim($general['legacy_state_topic'], '/')) ?>/availability/<?= h($device['device_id']) ?></code></div>
                     <?php if ($device['is_primary']): ?>
-                        <div class="sf-muted">Extra device topics: <code><?= h($device['state_topic']) ?></code> and <code><?= h($device['cmd_topic']) ?></code></div>
+                        <div class="sf-muted">Primary TV also has derived topics: <code><?= h($device['state_topic']) ?></code> and <code><?= h($device['cmd_topic']) ?></code></div>
                     <?php endif; ?>
                 </td>
             </tr>
@@ -569,13 +570,16 @@ LBWeb::lbheader('Samsung Frame TV', $pluginname, 'help.html');
 
 <div class="sf-card">
     <h3>Quick Test Commands (Any TV)</h3>
-    <p class="sf-muted">Select a target TV and send a test command to that specific device topic.</p>
+    <p class="sf-muted">Select an enabled target TV and send a test command to that specific device topic.</p>
+    <?php if (empty($enabled_devices)): ?>
+    <p class="sf-muted">No enabled TVs are configured. Enable at least one TV to use quick test commands.</p>
+    <?php else: ?>
     <form method="post" style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:12px;">
         <input type="hidden" name="action" value="test_cmd">
         <input type="hidden" name="scope" value="device">
         <label for="sf-quick-target" style="font-weight:600;">Target TV</label>
         <select id="sf-quick-target" name="target_device" style="padding:6px 8px; border:1px solid #ccc; border-radius:4px; min-width:220px;">
-            <?php foreach ($devices as $device): ?>
+            <?php foreach ($enabled_devices as $device): ?>
             <option value="<?= h($device['device_id']) ?>"><?= h($device['label']) ?> (<?= h($device['device_id']) ?>)</option>
             <?php endforeach; ?>
         </select>
@@ -588,13 +592,14 @@ LBWeb::lbheader('Samsung Frame TV', $pluginname, 'help.html');
         <input type="hidden" name="scope" value="device">
         <label for="sf-quick-target-custom" style="font-weight:600;">Target TV</label>
         <select id="sf-quick-target-custom" name="target_device" style="padding:6px 8px; border:1px solid #ccc; border-radius:4px; min-width:220px;">
-            <?php foreach ($devices as $device): ?>
+            <?php foreach ($enabled_devices as $device): ?>
             <option value="<?= h($device['device_id']) ?>"><?= h($device['label']) ?> (<?= h($device['device_id']) ?>)</option>
             <?php endforeach; ?>
         </select>
         <input type="text" name="cmd_payload" placeholder="e.g. key_KEY_HDMI1" style="padding:6px 8px; border:1px solid #ccc; border-radius:4px; width:260px">
         <button type="submit" class="sf-btn sf-btn-primary">Send Custom</button>
     </form>
+    <?php endif; ?>
 </div>
 
 <form method="post" id="sf-config-form">
@@ -604,14 +609,14 @@ LBWeb::lbheader('Samsung Frame TV', $pluginname, 'help.html');
         <h3>General Configuration</h3>
         <div class="sf-grid">
             <div>
-                <label>Legacy Primary State Topic <small>(primary TV → Loxone)</small></label>
+                <label>Primary State Topic (base) <small>(plugin → Loxone)</small></label>
                 <input type="text" name="state_topic" value="<?= h($general['legacy_state_topic']) ?>">
-                <div class="sf-muted">Each TV also publishes to <code><?= h($general['legacy_state_topic']) ?>/&lt;device_id&gt;</code>.</div>
+                <div class="sf-muted">Primary TV publishes here. All TVs also publish to <code><?= h($general['legacy_state_topic']) ?>/&lt;device_id&gt;</code>. Availability: <code><?= h($general['legacy_state_topic']) ?>/availability/&lt;device_id&gt;</code>.</div>
             </div>
             <div>
-                <label>Legacy Primary Command Topic <small>(Loxone → primary TV)</small></label>
+                <label>Primary Command Topic (base) <small>(Loxone → plugin)</small></label>
                 <input type="text" name="cmd_topic" value="<?= h($general['legacy_cmd_topic']) ?>">
-                <div class="sf-muted">Each TV also listens on <code><?= h($general['legacy_cmd_topic']) ?>/&lt;device_id&gt;</code>. Broadcast: <code><?= h(broadcast_cmd_topic($general['legacy_cmd_topic'])) ?></code></div>
+                <div class="sf-muted">Primary TV listens here. All TVs also listen on <code><?= h($general['legacy_cmd_topic']) ?>/&lt;device_id&gt;</code>. Broadcast: <code><?= h(broadcast_cmd_topic($general['legacy_cmd_topic'])) ?></code>.</div>
             </div>
             <div>
                 <label>Poll Interval (seconds)</label>
@@ -671,7 +676,7 @@ LBWeb::lbheader('Samsung Frame TV', $pluginname, 'help.html');
                 </div>
                 <div class="sf-btn-row">
                     <label><input type="checkbox" name="devices[<?= h($index) ?>][enabled]" value="1" <?= $device['enabled'] ? 'checked' : '' ?>> Enabled</label>
-                    <label><input type="radio" name="primary_device_row" value="<?= h($index) ?>" <?= $device['is_primary'] ? 'checked' : '' ?>> Use as primary TV (legacy topics)</label>
+                    <label><input type="radio" name="primary_device_row" value="<?= h($index) ?>" <?= $device['is_primary'] ? 'checked' : '' ?>> Use as primary TV (base topics)</label>
                 </div>
                 <div class="sf-muted" style="margin-top:8px">
                     Device topics: <code><?= h($device['cmd_topic']) ?></code> and <code><?= h($device['state_topic']) ?></code>
@@ -703,8 +708,9 @@ LBWeb::lbheader('Samsung Frame TV', $pluginname, 'help.html');
         <?php endif; ?>
     </p>
     <p class="sf-muted">
-        State topic: <code><?= h($device['ui_state_topic']) ?></code><br>
-        Command topic: <code><?= h($device['ui_cmd_topic']) ?></code><br>
+        State output topic: <code><?= h($device['ui_state_topic']) ?></code><br>
+        Command input topic: <code><?= h($device['ui_cmd_topic']) ?></code><br>
+        Availability output topic: <code><?= h(rtrim($general['legacy_state_topic'], '/')) ?>/availability/<?= h($device['device_id']) ?></code><br>
         Token file: <code><?= h(basename(token_file_for_device($lbpconfigdir, $device['device_id']))) ?></code>
     </p>
     <?php if ($pair_output && $pair_output_device_id === $device['device_id']): ?>
@@ -770,7 +776,7 @@ LBWeb::lbheader('Samsung Frame TV', $pluginname, 'help.html');
 </div>
 <?php endforeach; ?>
 
-<?php if (count($devices) > 1): ?>
+<?php if (count($enabled_devices) > 1): ?>
 <div class="sf-card">
     <h3>All TVs Test Controls</h3>
     <p class="sf-muted">Send the same command to every enabled TV via <code><?= h(broadcast_cmd_topic($general['legacy_cmd_topic'])) ?></code>.</p>
@@ -853,7 +859,7 @@ LBWeb::lbheader('Samsung Frame TV', $pluginname, 'help.html');
                 + '</div>'
                 + '<div class="sf-btn-row">'
                 + '  <label><input type="checkbox" name="devices[' + idx + '][enabled]" value="1" checked> Enabled</label>'
-                + '  <label><input type="radio" name="primary_device_row" value="' + idx + '"> Use as primary TV (legacy topics)</label>'
+                + '  <label><input type="radio" name="primary_device_row" value="' + idx + '"> Use as primary TV (base topics)</label>'
                 + '</div>';
             container.appendChild(wrapper);
             var removeButton = wrapper.querySelector('[data-remove-device]');

@@ -51,6 +51,7 @@ LEGACY_CMD_TOPIC = "loxberry/plugin/samsungframe/cmd"
 log = logging.getLogger("samsungframe")
 
 _mqtt_client = None
+_availability_clients: Dict[str, mqtt.Client] = {}
 _runtime_config = None
 _devices: Dict[str, "DeviceRuntime"] = {}
 _topic_targets: Dict[str, List[str]] = {}
@@ -87,6 +88,7 @@ class DeviceRuntime:
     token_file: str
     state_topic: str
     cmd_topic: str
+    availability_topic: str
     is_primary: bool = False
     current_state: str = ""
     tv: Optional[SamsungTVWS] = None
@@ -262,6 +264,10 @@ def topic_for_device(base_topic: str, device_id: str) -> str:
     return f"{base_topic.rstrip('/')}/{device_id}"
 
 
+def availability_topic_for_device(base_state_topic: str, device_id: str) -> str:
+    return f"{base_state_topic.rstrip('/')}/availability/{device_id}"
+
+
 def token_file_for_device(config_dir: str, device_id: str) -> str:
     if device_id == "default":
         return os.path.join(config_dir, "token.txt")
@@ -339,6 +345,7 @@ def build_device_runtimes(runtime_config: RuntimeConfig) -> Dict[str, DeviceRunt
             token_file=token_file_for_device(runtime_config.config_dir, device_cfg.device_id),
             state_topic=topic_for_device(runtime_config.legacy_state_topic, device_cfg.device_id),
             cmd_topic=topic_for_device(runtime_config.legacy_cmd_topic, device_cfg.device_id),
+            availability_topic=availability_topic_for_device(runtime_config.legacy_state_topic, device_cfg.device_id),
             is_primary=device_cfg.device_id == runtime_config.primary_device_id,
         )
     return devices
@@ -388,6 +395,14 @@ def on_mqtt_connect(client, userdata, flags, rc) -> None:
         if device.current_state:
             device.publish_state(device.current_state, force=True)
 
+    for device in _devices.values():
+        if not device.cfg.enabled:
+            try:
+                client.publish(device.availability_topic, "offline", qos=1, retain=True)
+                log.info(device.prefix(f"Availability published: 'offline' → {device.availability_topic} (disabled)"))
+            except Exception as exc:
+                log.warning(device.prefix(f"Failed to publish disabled availability state: {exc}"))
+
 
 def on_mqtt_disconnect(client, userdata, rc) -> None:
     if rc != 0:
@@ -413,13 +428,12 @@ def on_mqtt_message(client, userdata, msg) -> None:
         device.handle_command(payload)
 
 
-def setup_mqtt():
+def setup_mqtt(host: str, port: int, user: str, password: str):
     client = mqtt.Client(client_id="samsungframe-monitor", clean_session=True)
     client.on_connect = on_mqtt_connect
     client.on_disconnect = on_mqtt_disconnect
     client.on_message = on_mqtt_message
 
-    host, port, user, password = get_mqtt_connection()
     if user:
         client.username_pw_set(user, password)
         log.info(f"[system] MQTT using credentials for user '{user}'")
@@ -429,6 +443,49 @@ def setup_mqtt():
     client.loop_start()
     log.info(f"[system] MQTT connecting to {host}:{port}")
     return client
+
+
+def make_availability_on_connect(device: DeviceRuntime):
+    def _on_connect(client, userdata, flags, rc):
+        if rc == 0:
+            try:
+                client.publish(device.availability_topic, "online", qos=1, retain=True)
+                log.info(device.prefix(f"Availability published: 'online' → {device.availability_topic}"))
+            except Exception as exc:
+                log.warning(device.prefix(f"Failed to publish online availability state: {exc}"))
+        else:
+            log.warning(device.prefix(f"Availability MQTT connection failed, rc={rc}"))
+
+    return _on_connect
+
+
+def make_availability_on_disconnect(device: DeviceRuntime):
+    def _on_disconnect(client, userdata, rc):
+        if rc != 0:
+            log.warning(device.prefix(f"Availability MQTT disconnected unexpectedly (rc={rc}), will auto-reconnect"))
+
+    return _on_disconnect
+
+
+def setup_availability_clients(host: str, port: int, user: str, password: str) -> Dict[str, mqtt.Client]:
+    clients: Dict[str, mqtt.Client] = {}
+    for device in _devices.values():
+        if not device.cfg.enabled:
+            continue
+
+        client_id = f"sframe-avail-{device.cfg.device_id}"
+        client = mqtt.Client(client_id=client_id, clean_session=True)
+        if user:
+            client.username_pw_set(user, password)
+
+        client.will_set(device.availability_topic, "offline", qos=1, retain=True)
+        client.on_connect = make_availability_on_connect(device)
+        client.on_disconnect = make_availability_on_disconnect(device)
+        client.connect_async(host, port, keepalive=60)
+        client.loop_start()
+        clients[device.cfg.device_id] = client
+
+    return clients
 
 
 def run_poll_loop() -> None:
@@ -452,7 +509,7 @@ def handle_signal(signum, frame) -> None:
 
 
 def main() -> None:
-    global _mqtt_client, _runtime_config, _devices, _topic_targets, _broadcast_cmd_topic
+    global _mqtt_client, _availability_clients, _runtime_config, _devices, _topic_targets, _broadcast_cmd_topic
 
     parser = argparse.ArgumentParser(description="Samsung Frame TV monitor daemon")
     parser.add_argument("--config", required=True, help="Path to samsungframe.cfg")
@@ -481,7 +538,9 @@ def main() -> None:
     signal.signal(signal.SIGTERM, handle_signal)
     signal.signal(signal.SIGINT, handle_signal)
 
-    _mqtt_client = setup_mqtt()
+    host, port, user, password = get_mqtt_connection()
+    _mqtt_client = setup_mqtt(host, port, user, password)
+    _availability_clients = setup_availability_clients(host, port, user, password)
 
     for _ in range(20):
         if _mqtt_client.is_connected():
@@ -493,9 +552,22 @@ def main() -> None:
     try:
         run_poll_loop()
     finally:
+        for device_id, client in _availability_clients.items():
+            device = _devices.get(device_id)
+            if device:
+                try:
+                    client.publish(device.availability_topic, "offline", qos=1, retain=True)
+                except Exception:
+                    pass
+
         log.info("[system] Disconnecting MQTT")
         _mqtt_client.loop_stop()
         _mqtt_client.disconnect()
+
+        for client in _availability_clients.values():
+            client.loop_stop()
+            client.disconnect()
+
         log.info("[system] Samsung Frame TV monitor stopped")
 
 

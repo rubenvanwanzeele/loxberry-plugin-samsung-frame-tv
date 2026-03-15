@@ -69,6 +69,11 @@ def main():
         print(f"ERROR: Device {requested_device_id!r} not found in config.")
         sys.exit(2)
 
+    if not device["ip"]:
+        print(f"ERROR: [{device['label']}] No IP address configured for this TV.")
+        print("Set the TV IP in the plugin configuration first, then run pairing again.")
+        sys.exit(2)
+
     config_dir = os.path.dirname(args.config)
     token_file = token_file_for_device(config_dir, device["device_id"])
 
