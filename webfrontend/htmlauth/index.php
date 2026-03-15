@@ -1,4 +1,9 @@
 <?php
+// Temporary diagnostics for blank-page troubleshooting on LoxBerry.
+// Remove these lines again after the root cause is fixed.
+error_reporting(E_ALL);
+ini_set('display_errors', '1');
+
 /**
  * Samsung Frame TV — LoxBerry Plugin Web UI
  *
