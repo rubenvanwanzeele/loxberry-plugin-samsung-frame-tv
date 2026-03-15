@@ -152,7 +152,7 @@ function cfg_write_model($file, $general, $devices, $mqtt_host, $mqtt_port) {
         ];
     }
 
-    $primary_id = sanitize_device_id($general['primary_device'] ?? $devices[0]['device_id']);
+    $primary_id = sanitize_device_id(isset($general['primary_device']) ? $general['primary_device'] : $devices[0]['device_id']);
     $primary_device = null;
     foreach ($devices as $device) {
         if ($device['device_id'] === $primary_id) {
@@ -272,7 +272,7 @@ $mqtt_auth = !empty($mqtt_cred['brokeruser'])
     : '';
 
 if (isset($_GET['ajax']) && $_GET['ajax'] === 'status') {
-    $device_id = sanitize_device_id($_GET['device'] ?? 'default');
+    $device_id = sanitize_device_id(isset($_GET['device']) ? $_GET['device'] : 'default');
     $model = cfg_load_model($cfgfile);
     $device = find_device($model['devices'], $device_id);
     $topic = $device ? $device['ui_state_topic'] : normalize_topic(cfg_get($plugin_cfg, 'MQTT', 'STATE_TOPIC', 'loxberry/plugin/samsungframe/state'), 'loxberry/plugin/samsungframe/state');
@@ -296,7 +296,7 @@ $pair_output = '';
 $pair_output_device_id = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $action = $_POST['action'] ?? '';
+    $action = isset($_POST['action']) ? $_POST['action'] : '';
 
     if ($action === 'restart_daemon') {
         $out = shell_exec('sudo /bin/systemctl restart samsungframe.service 2>&1');
@@ -307,10 +307,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'save_config') {
         $notes = [];
         $general_post = [
-            'legacy_state_topic' => normalize_topic($_POST['state_topic'] ?? $general['legacy_state_topic'], 'loxberry/plugin/samsungframe/state'),
-            'legacy_cmd_topic' => normalize_topic($_POST['cmd_topic'] ?? $general['legacy_cmd_topic'], 'loxberry/plugin/samsungframe/cmd'),
-            'poll_interval' => max(5, min(300, intval($_POST['poll_interval'] ?? $general['poll_interval']))),
-            'loglevel' => max(1, min(6, intval($_POST['loglevel'] ?? $general['loglevel']))),
+            'legacy_state_topic' => normalize_topic(isset($_POST['state_topic']) ? $_POST['state_topic'] : $general['legacy_state_topic'], 'loxberry/plugin/samsungframe/state'),
+            'legacy_cmd_topic' => normalize_topic(isset($_POST['cmd_topic']) ? $_POST['cmd_topic'] : $general['legacy_cmd_topic'], 'loxberry/plugin/samsungframe/cmd'),
+            'poll_interval' => max(5, min(300, intval(isset($_POST['poll_interval']) ? $_POST['poll_interval'] : $general['poll_interval']))),
+            'loglevel' => max(1, min(6, intval(isset($_POST['loglevel']) ? $_POST['loglevel'] : $general['loglevel']))),
             'primary_device' => 'default',
         ];
 
@@ -328,12 +328,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 continue;
             }
 
-            $requested_id = trim((string)($row['device_id'] ?? ''));
-            $label = trim((string)($row['label'] ?? ''));
-            $ip = trim((string)($row['ip'] ?? ''));
-            $mac = trim((string)($row['mac'] ?? ''));
-            $name = trim((string)($row['name'] ?? '')) ?: 'LoxBerry';
-            $port = max(1, min(65535, intval($row['port'] ?? 8002) ?: 8002));
+            $requested_id = trim((string)(isset($row['device_id']) ? $row['device_id'] : ''));
+            $label = trim((string)(isset($row['label']) ? $row['label'] : ''));
+            $ip = trim((string)(isset($row['ip']) ? $row['ip'] : ''));
+            $mac = trim((string)(isset($row['mac']) ? $row['mac'] : ''));
+            $name = trim((string)(isset($row['name']) ? $row['name'] : '')) ?: 'LoxBerry';
+            $port = max(1, min(65535, intval(isset($row['port']) ? $row['port'] : 8002) ?: 8002));
             $enabled = !empty($row['enabled']);
 
             if ($requested_id === '') {
@@ -399,7 +399,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'pair') {
-        $device_id = sanitize_device_id($_POST['device_id'] ?? 'default');
+        $device_id = sanitize_device_id(isset($_POST['device_id']) ? $_POST['device_id'] : 'default');
         $cmd = '/usr/bin/python3 ' . escapeshellarg("$bindir/pair.py")
              . ' --config ' . escapeshellarg($cfgfile)
              . ' --device ' . escapeshellarg($device_id)
@@ -419,9 +419,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'test_cmd') {
-        $cmd_payload = trim((string)($_POST['cmd_payload'] ?? ''));
-        $target_device = sanitize_device_id($_POST['target_device'] ?? 'default');
-        $scope = $_POST['scope'] ?? 'device';
+        $cmd_payload = trim((string)(isset($_POST['cmd_payload']) ? $_POST['cmd_payload'] : ''));
+        $target_device = sanitize_device_id(isset($_POST['target_device']) ? $_POST['target_device'] : 'default');
+        $scope = isset($_POST['scope']) ? $_POST['scope'] : 'device';
 
         if ($cmd_payload !== '') {
             if ($scope === 'all') {
