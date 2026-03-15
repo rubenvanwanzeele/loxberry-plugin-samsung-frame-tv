@@ -245,7 +245,7 @@ function mqtt_read_state($topic, $mqtt_host, $mqtt_port, $mqtt_auth) {
     return $result !== '' ? $result : 'unknown';
 }
 
-function mqtt_publish($topic, $payload, $mqtt_host, $mqtt_port, $mqtt_auth) {
+function sf_mqtt_publish($topic, $payload, $mqtt_host, $mqtt_port, $mqtt_auth) {
     $cmd = 'mosquitto_pub -h ' . escapeshellarg($mqtt_host)
          . ' -p ' . escapeshellarg($mqtt_port)
          . $mqtt_auth
@@ -435,7 +435,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $device = find_device($devices, $target_device);
                 $topic = $device ? $device['ui_cmd_topic'] : $general['legacy_cmd_topic'];
             }
-            $pub_out = mqtt_publish($topic, $cmd_payload, $mqtt_host, $mqtt_port, $mqtt_auth);
+            $pub_out = sf_mqtt_publish($topic, $cmd_payload, $mqtt_host, $mqtt_port, $mqtt_auth);
             $message = "Command '{$cmd_payload}' sent to {$topic}." . ($pub_out ? ' (' . $pub_out . ')' : '');
             $message_type = 'success';
             $refresh_after_cmd = true;
