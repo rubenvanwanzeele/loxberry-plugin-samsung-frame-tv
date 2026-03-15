@@ -480,7 +480,6 @@ LBWeb::lbheader('Samsung Frame TV', $pluginname, 'help.html');
 .sf-btn-danger { background:#c0392b; color:#fff; }
 .sf-btn-purple { background:#8e44ad; color:#fff; }
 .sf-btn-grey { background:#7f8c8d; color:#fff; }
-.sf-link-btn { text-decoration:none; display:inline-block; }
 .sf-actions { margin-top:14px; display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
 .sf-btn:hover { opacity:.87; }
 .sf-state-badge, .sf-small-badge { display:inline-block; color:#fff; font-weight:600; letter-spacing:.2px; }
@@ -562,10 +561,40 @@ LBWeb::lbheader('Samsung Frame TV', $pluginname, 'help.html');
             <input type="hidden" name="action" value="restart_daemon">
             <button type="submit" class="sf-btn sf-btn-warning">Restart Daemon</button>
         </form>
-        <a class="sf-btn sf-btn-grey sf-link-btn" href="help.html" title="Open plugin help and MQTT reference">
-            Open Help
-        </a>
+        <form method="get" action="help.html" style="display:inline">
+            <button type="submit" class="sf-btn sf-btn-warning" title="Open plugin help and MQTT reference">Open Help</button>
+        </form>
     </div>
+</div>
+
+<div class="sf-card">
+    <h3>Quick Test Commands (Any TV)</h3>
+    <p class="sf-muted">Select a target TV and send a test command to that specific device topic.</p>
+    <form method="post" style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:12px;">
+        <input type="hidden" name="action" value="test_cmd">
+        <input type="hidden" name="scope" value="device">
+        <label for="sf-quick-target" style="font-weight:600;">Target TV</label>
+        <select id="sf-quick-target" name="target_device" style="padding:6px 8px; border:1px solid #ccc; border-radius:4px; min-width:220px;">
+            <?php foreach ($devices as $device): ?>
+            <option value="<?= h($device['device_id']) ?>"><?= h($device['label']) ?> (<?= h($device['device_id']) ?>)</option>
+            <?php endforeach; ?>
+        </select>
+        <?php foreach (['power_on' => ['sf-btn-success', 'Power On'], 'power_off' => ['sf-btn-danger', 'Power Off'], 'art_on' => ['sf-btn-purple', 'Art On'], 'art_off' => ['sf-btn-grey', 'Art Off']] as $cmd => $meta): ?>
+        <button type="submit" name="cmd_payload" value="<?= h($cmd) ?>" class="sf-btn <?= h($meta[0]) ?>"><?= h($meta[1]) ?></button>
+        <?php endforeach; ?>
+    </form>
+    <form method="post" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+        <input type="hidden" name="action" value="test_cmd">
+        <input type="hidden" name="scope" value="device">
+        <label for="sf-quick-target-custom" style="font-weight:600;">Target TV</label>
+        <select id="sf-quick-target-custom" name="target_device" style="padding:6px 8px; border:1px solid #ccc; border-radius:4px; min-width:220px;">
+            <?php foreach ($devices as $device): ?>
+            <option value="<?= h($device['device_id']) ?>"><?= h($device['label']) ?> (<?= h($device['device_id']) ?>)</option>
+            <?php endforeach; ?>
+        </select>
+        <input type="text" name="cmd_payload" placeholder="e.g. key_KEY_HDMI1" style="padding:6px 8px; border:1px solid #ccc; border-radius:4px; width:260px">
+        <button type="submit" class="sf-btn sf-btn-primary">Send Custom</button>
+    </form>
 </div>
 
 <form method="post" id="sf-config-form">
