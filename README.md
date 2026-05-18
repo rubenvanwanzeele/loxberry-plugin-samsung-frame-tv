@@ -9,10 +9,11 @@ No cloud. No SmartThings. Direct local control only.
 
 ## Features
 
-- Detects TV state — **off / art mode / on** — and publishes to MQTT every 5 seconds
+- Detects three TV states — **off / art mode / on** — and publishes to MQTT
 - Supports **multiple Samsung TVs** in one plugin instance
-- Uses one **primary TV** on the base MQTT topics
-- Publishes and subscribes to **per-device MQTT topics** for extra TVs
+- One TV is the **primary TV** — it also publishes on the original base topics for backwards compatibility
+- Each TV gets its own **device-specific MQTT topics**
+- **Device availability topics** (`online` / `offline`) for reliable Loxone automation
 - Sends commands from Loxone to the TV: power, art mode, any remote key
 - Wake-on-LAN support for powering on from standby
 - Web UI for configuration, pairing, live status and test controls
@@ -38,7 +39,7 @@ No cloud. No SmartThings. Direct local control only.
 In LoxBerry: **System → Plugin Manager → Install from URL**
 
 ```
-https://github.com/rubenvanwanzeele/loxberry-plugin-samsung-frame-tv/archive/refs/tags/v1.0.0.zip
+https://github.com/rubenvanwanzeele/loxberry-plugin-samsung-frame-tv/archive/refs/tags/v1.1.0.zip
 ```
 
 Python dependencies (`samsungtvws`, `paho-mqtt`, `wakeonlan`) are installed automatically.
