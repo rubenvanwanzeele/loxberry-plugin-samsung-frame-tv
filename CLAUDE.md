@@ -246,6 +246,54 @@ LBWeb::lbheader("Samsung Frame TV", "samsungframe", "help.html");
 
 ---
 
+## Release Process
+
+### Auto-update mechanism
+
+LoxBerry auto-updates work via a `release.cfg` file hosted in this repo. On install,
+LoxBerry reads `RELEASECFG` from `plugin.cfg` and stores that URL. Every day it fetches
+the URL, compares `VERSION` in `release.cfg` to the installed version, and notifies or
+auto-installs depending on user preference.
+
+**`plugin.cfg`** — contains the URL to the release file:
+```ini
+[AUTOUPDATE]
+AUTOMATIC_UPDATES=true
+RELEASECFG=https://raw.githubusercontent.com/rubenvanwanzeele/loxberry-plugin-samsung-frame-tv/master/release.cfg
+```
+
+**`release.cfg`** — the file LoxBerry fetches daily (in repo root):
+```ini
+[AUTOUPDATE]
+VERSION=1.1.0
+ARCHIVEURL=https://github.com/rubenvanwanzeele/loxberry-plugin-samsung-frame-tv/archive/refs/tags/v1.1.0.zip
+INFOURL=https://wiki.loxberry.de/plugins/samsung-frame-plugin/start
+```
+
+### Releasing a new version (e.g. 1.2.0)
+
+1. Bump `VERSION` in `plugin.cfg` to `1.2.0`
+2. Update `release.cfg` — set `VERSION=1.2.0` and `ARCHIVEURL` to the new tag zip URL
+3. Commit both files
+4. Push to `master`
+5. Create and push a Git tag: `git tag v1.2.0 && git push origin v1.2.0`
+6. Create a GitHub Release from that tag (so the zip URL resolves)
+7. Update the wiki page at https://wiki.loxberry.de/plugins/samsung-frame-plugin/start if needed
+
+### `AUTOMATIC_UPDATES` values (stored in LoxBerry's plugin DB)
+
+| Value | Meaning |
+|---|---|
+| `false` / `0` | No update checking |
+| `true` / `1` | Update checking enabled; user controls whether to auto-install |
+| `3` | Auto-install releases (set by LoxBerry when user enables auto-updates) |
+| `4` | Auto-install pre-releases |
+
+Setting `AUTOMATIC_UPDATES=true` in `plugin.cfg` means: on a fresh install, enable update
+checking. The user can still override this in the LoxBerry UI.
+
+---
+
 ## Reference Links
 
 - LoxBerry plugin basics: https://wiki.loxberry.de/en/entwickler/grundlagen_zur_erstellung_eines_plugins
